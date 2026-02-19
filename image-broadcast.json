@@ -1,0 +1,136 @@
+{
+  "_meta": {
+    "name": "Kamilight — Phase 1b: WhatsApp Image Broadcast via Telegram",
+    "description": "Admin forwards/sends image in Telegram with caption /broadcast [tag] → sends image to WhatsApp contacts",
+    "version": "1.0.0",
+    "instructions": "Use this workflow ALONGSIDE broadcast-trigger.json. Import separately in n8n."
+  },
+
+  "how_it_works": {
+    "admin_action": "Admin sends a photo in Telegram with caption: /broadcast active client",
+    "workflow_action": "n8n receives the photo, downloads it, sends it to all contacts with matching tag via WhatsApp image message",
+    "caption_format": "/broadcast [tag]",
+    "example": "Caption: /broadcast high potential"
+  },
+
+  "nodes": [
+    {
+      "id": "node_1",
+      "name": "Telegram Photo Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "parameters": {
+        "updates": ["message"],
+        "additionalFields": {}
+      },
+      "notes": "Same trigger as text broadcast. We detect photo vs text in next node."
+    },
+
+    {
+      "id": "node_2",
+      "name": "Check if Message Has Photo",
+      "type": "n8n-nodes-base.if",
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.message.photo ? 'yes' : 'no' }}",
+              "operation": "equal",
+              "value2": "yes"
+            }
+          ]
+        }
+      }
+    },
+
+    {
+      "id": "node_3",
+      "name": "Parse Image Command",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "jsCode": "const message = $input.first().json.message;\nconst caption = message?.caption || '';\nconst adminChatId = message?.chat?.id;\n\n// Get highest quality photo (last in array)\nconst photos = message?.photo || [];\nconst bestPhoto = photos[photos.length - 1];\nconst fileId = bestPhoto?.file_id;\n\nif (!fileId) {\n  return [{ json: { error: 'no_photo_file_id', adminChatId } }];\n}\n\nif (!caption.startsWith('/broadcast')) {\n  return [{ json: { error: 'missing_broadcast_command_in_caption', adminChatId, \n    help: 'Send photo with caption: /broadcast [tag]' } }];\n}\n\nconst rest = caption.replace('/broadcast', '').trim();\n\nconst ALLOWED_TAGS = ['active client', 'potential client', 'high potential', 'past client', 'cold', 'warm'];\nlet matchedTag = null;\nfor (const tag of ALLOWED_TAGS) {\n  if (rest.toLowerCase().startsWith(tag)) {\n    matchedTag = tag;\n    break;\n  }\n}\n\nif (!matchedTag) {\n  return [{ json: { error: 'invalid_tag', raw: rest, adminChatId } }];\n}\n\nreturn [{ json: { \n  tag: matchedTag,\n  file_id: fileId,\n  adminChatId,\n  parsed_ok: true\n} }];"
+      }
+    },
+
+    {
+      "id": "node_4",
+      "name": "Get Telegram File Path",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/botYOUR_BOT_TOKEN/getFile?file_id={{ $json.file_id }}"
+      },
+      "notes": "Replace YOUR_BOT_TOKEN. Gets download URL for the image."
+    },
+
+    {
+      "id": "node_5",
+      "name": "Download Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/file/botYOUR_BOT_TOKEN/{{ $json.result.file_path }}",
+        "responseFormat": "file"
+      },
+      "notes": "Downloads actual image binary."
+    },
+
+    {
+      "id": "node_6",
+      "name": "Upload to WhatsApp Media",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/media",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "messaging_product", "value": "whatsapp" },
+            { "name": "type", "value": "image/jpeg" },
+            { "name": "file", "value": "={{ $binary.data }}", "parameterType": "formBinaryData" }
+          ]
+        }
+      },
+      "notes": "Uploads image to WhatsApp Media API. Returns media_id for sending."
+    },
+
+    {
+      "id": "node_7",
+      "name": "Read Sheets + Filter",
+      "type": "n8n-nodes-base.googleSheets",
+      "parameters": {
+        "operation": "getAll",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Contacts",
+        "returnAll": true
+      },
+      "notes": "Read all contacts. Next node filters by tag."
+    },
+
+    {
+      "id": "node_8",
+      "name": "Send WhatsApp Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"messaging_product\": \"whatsapp\",\n  \"recipient_type\": \"individual\",\n  \"to\": \"{{ $json.phone }}\",\n  \"type\": \"image\",\n  \"image\": {\n    \"id\": \"{{ $('Upload to WhatsApp Media').first().json.id }}\"\n  }\n}"
+      },
+      "continueOnFail": true
+    }
+  ],
+
+  "admin_instructions": [
+    "To send an IMAGE broadcast:",
+    "1. Open Telegram and go to the Kamilight bot",
+    "2. Attach your image/flyer",
+    "3. In the caption field type: /broadcast [tag]",
+    "4. Examples:",
+    "   /broadcast active client",
+    "   /broadcast high potential",
+    "   /broadcast past client",
+    "5. Send — the bot will confirm and begin broadcasting"
+  ]
+}

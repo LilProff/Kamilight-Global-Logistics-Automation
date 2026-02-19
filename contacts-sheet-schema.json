@@ -1,0 +1,24 @@
+{
+  "sheet_name": "Contacts",
+  "columns": [
+    { "col": "A", "header": "ID",               "type": "auto",    "formula": "=ROW()-1",       "editable": false },
+    { "col": "B", "header": "Name",              "type": "text",    "required": true,             "editable": true  },
+    { "col": "C", "header": "Phone",             "type": "text",    "required": true,             "editable": true,  "format": "E.164 e.g. +2348012345678" },
+    { "col": "D", "header": "Company",           "type": "text",    "required": false,            "editable": true  },
+    { "col": "E", "header": "Tag",               "type": "enum",    "required": true,             "editable": true,  "allowed_values": "see tag-definitions.json" },
+    { "col": "F", "header": "Stage",             "type": "enum",    "required": true,             "editable": true,  "allowed_values": ["lead", "prospect", "active", "past", "churned"] },
+    { "col": "G", "header": "Source",            "type": "enum",    "required": false,            "editable": true,  "allowed_values": ["referral", "apollo", "manual", "telegram", "website"] },
+    { "col": "H", "header": "Last Contacted",    "type": "date",    "required": false,            "editable": false, "updated_by": "automation" },
+    { "col": "I", "header": "Follow-up Due",     "type": "date",    "required": false,            "editable": false, "formula": "=IF(H2=\"\",\"\",H2+7)" },
+    { "col": "J", "header": "Response Status",   "type": "enum",    "required": false,            "editable": true,  "allowed_values": ["no_reply", "responded", "interested", "not_interested"] },
+    { "col": "K", "header": "Notes",             "type": "text",    "required": false,            "editable": true  },
+    { "col": "L", "header": "Assigned To",       "type": "text",    "required": false,            "editable": true  },
+    { "col": "M", "header": "Created Date",      "type": "date",    "required": false,            "editable": false, "default": "today" },
+    { "col": "N", "header": "WhatsApp Opt-Out",  "type": "boolean", "required": false,            "editable": true,  "note": "TRUE = never message this contact" }
+  ],
+  "filter_logic": {
+    "broadcast": "Tag == target_tag AND WhatsApp_Opt-Out != TRUE",
+    "followup":  "Follow-up_Due <= TODAY() AND Response_Status == 'no_reply' AND WhatsApp_Opt-Out != TRUE",
+    "lifecycle": "Tag IN ['active client', 'past client'] AND WhatsApp_Opt-Out != TRUE"
+  }
+}

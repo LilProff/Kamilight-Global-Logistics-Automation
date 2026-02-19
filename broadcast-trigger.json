@@ -1,0 +1,1682 @@
+{
+  "name": "Kamilight — Phase 1: WhatsApp Broadcast V2",
+  "nodes": [
+    {
+      "id": "0f8fc025-8082-4ad8-8c94-de6cd16a28e0",
+      "name": "📡 Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        100,
+        400
+      ],
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {}
+      },
+      "credentials": {
+        "telegramApi": {
+          "id": "PLACEHOLDER_TELEGRAM_ID",
+          "name": "Telegram Account"
+        }
+      },
+      "notes": "Receives ALL admin messages including text, photo, video, document, audio"
+    },
+    {
+      "id": "73725199-4ee9-4faf-8f9b-86e4b4cf586d",
+      "name": "🔐 Admin Gate",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        300,
+        400
+      ],
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.message.from.id.toString() }}",
+              "operation": "equal",
+              "value2": "YOUR_ADMIN_TELEGRAM_CHAT_ID"
+            }
+          ]
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "8af8629e-f91f-4b00-9528-44a4773bc9cc",
+      "name": "⛔ Reject Unauthorized",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        500,
+        600
+      ],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.message.from.id }}",
+        "text": "⛔ This bot is private."
+      },
+      "credentials": {}
+    },
+    {
+      "id": "9eae5eb3-ff47-4894-a674-9f68a1286c51",
+      "name": "📋 Read Session Tab",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        500,
+        300
+      ],
+      "parameters": {
+        "operation": "getAll",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Session",
+        "returnAll": true
+      },
+      "credentials": {},
+      "notes": "Reads the Session tab to find the admin's current broadcast state"
+    },
+    {
+      "id": "f3361512-b5a4-4bf1-9670-977fa9f07eea",
+      "name": "🧠 Parse Message + Determine Step",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        700,
+        300
+      ],
+      "parameters": {
+        "jsCode": "// =========================================================\n// PARSE INCOMING + DETERMINE SESSION STATE\n// =========================================================\n\nconst msg = $('📡 Telegram Trigger').first().json.message;\nconst adminChatId = msg.chat.id.toString();\n\n// Detect incoming content type\nconst rawText     = msg.text || '';\nconst hasPhoto    = !!msg.photo;\nconst hasVideo    = !!msg.video;\nconst hasDocument = !!msg.document;\nconst hasAudio    = !!(msg.audio || msg.voice);\nconst caption     = msg.caption || '';\n\nlet contentType = 'none';\nif (rawText && !hasPhoto && !hasVideo && !hasDocument && !hasAudio) contentType = 'text';\nif (hasPhoto)    contentType = 'photo';\nif (hasVideo)    contentType = 'video';\nif (hasDocument) contentType = 'document';\nif (hasAudio)    contentType = 'audio';\n\n// Get highest-res file_id for media\nlet fileId = null;\nif (hasPhoto)    fileId = msg.photo[msg.photo.length - 1].file_id;\nif (hasVideo)    fileId = msg.video.file_id;\nif (hasDocument) fileId = msg.document.file_id;\nif (hasAudio)    fileId = (msg.audio || msg.voice).file_id;\n\n// Find active session for this admin\nconst sessions = $('📋 Read Session Tab').all();\nconst activeSession = sessions.find(s =>\n  s.json.admin_chat_id === adminChatId && s.json.status === 'active'\n);\n\nconst currentStep = activeSession?.json?.step || 'new';\n\n// Detect special commands\nconst textLower = rawText.toLowerCase().trim();\nconst isYes    = ['yes', '/confirm', 'confirm', 'send', '✅ yes send it'].includes(textLower);\nconst isNo     = ['no', '/cancel', 'cancel', '❌ cancel', 'abort'].includes(textLower);\nconst isStart  = ['/start', '/broadcast', 'start', 'hi', 'hello', 'hey'].includes(textLower) || currentStep === 'new';\n\nreturn [{\n  json: {\n    adminChatId,\n    currentStep,\n    activeSession: activeSession?.json || null,\n    rawText,\n    contentType,\n    fileId,\n    caption,\n    isYes,\n    isNo,\n    isStart,\n    isMediaContent: ['photo', 'video', 'document', 'audio'].includes(contentType)\n  }\n}];"
+      },
+      "credentials": {}
+    },
+    {
+      "id": "42c76dd9-175a-4f78-8f5a-4bcc22a101c8",
+      "name": "🔀 Route by Current Step",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        900,
+        300
+      ],
+      "parameters": {
+        "dataPropertyName": "={{ $json.currentStep }}",
+        "rules": {
+          "rules": [
+            {
+              "value": "new",
+              "output": 0
+            },
+            {
+              "value": "awaiting_segment",
+              "output": 1
+            },
+            {
+              "value": "awaiting_content",
+              "output": 2
+            },
+            {
+              "value": "awaiting_confirm",
+              "output": 3
+            }
+          ]
+        },
+        "fallbackOutput": 0
+      },
+      "credentials": {}
+    },
+    {
+      "id": "70e006a7-564d-4ac6-b5e6-ca788df6bdfe",
+      "name": "📢 STEP 0 — Show Segment Menu",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        100
+      ],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.adminChatId }}",
+        "text": "📢 *Kamilight Broadcast System*\n\nWho should receive this message?\n\nSelect a segment below:",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_markup": {
+            "keyboard": [
+              [
+                {
+                  "text": "1️⃣  Major Clients"
+                },
+                {
+                  "text": "2️⃣  Existing Clients"
+                }
+              ],
+              [
+                {
+                  "text": "3️⃣  Potential Clients"
+                },
+                {
+                  "text": "4️⃣  Past Clients"
+                }
+              ],
+              [
+                {
+                  "text": "5️⃣  ALL Contacts"
+                }
+              ]
+            ],
+            "resize_keyboard": true,
+            "one_time_keyboard": true
+          }
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "2a0b98e0-fafb-4db7-8b6f-ff4bd9f7e993",
+      "name": "💾 Save Session — awaiting_segment",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1300,
+        100
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Session",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "admin_chat_id": "={{ $json.adminChatId }}",
+            "step": "awaiting_segment",
+            "selected_segment": "",
+            "content_type": "",
+            "content_text": "",
+            "media_file_id": "",
+            "media_caption": "",
+            "media_type": "",
+            "started_at": "={{ new Date().toISOString() }}",
+            "status": "active"
+          }
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "24240450-c3f5-4df3-88c8-4ecc2533dd3f",
+      "name": "🗂 STEP 1 — Parse Segment Selection",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        300
+      ],
+      "parameters": {
+        "jsCode": "const text = $json.rawText.toLowerCase().trim();\nconst adminChatId = $json.adminChatId;\n\nconst MAP = {\n  '1': 'major client', '1️⃣  major clients': 'major client',\n  'major client': 'major client', 'major clients': 'major client',\n  '2': 'existing client', '2️⃣  existing clients': 'existing client',\n  'existing client': 'existing client', 'existing clients': 'existing client',\n  '3': 'potential client', '3️⃣  potential clients': 'potential client',\n  'potential client': 'potential client', 'potential clients': 'potential client',\n  '4': 'past client', '4️⃣  past clients': 'past client',\n  'past client': 'past client', 'past clients': 'past client',\n  '5': 'all', '5️⃣  all contacts': 'all', 'all': 'all', 'all contacts': 'all'\n};\n\nconst segment = MAP[text];\nif (!segment) {\n  return [{ json: { ...($json), parseError: true, adminChatId } }];\n}\n\nreturn [{ json: { ...($json), selectedSegment: segment, adminChatId } }];"
+      },
+      "credentials": {}
+    },
+    {
+      "id": "17af22f5-284e-4dba-a098-a2631654c389",
+      "name": "❓ Valid Segment?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1300,
+        300
+      ],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.parseError }}",
+              "operation": "notEqual",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "378bab88-23d4-4fd4-a18f-62da924b9add",
+      "name": "⚠️ Invalid Segment — Re-prompt",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1500,
+        450
+      ],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.adminChatId }}",
+        "text": "❓ I didn't understand that.\n\nPlease tap one of the buttons or type a number:\n1 — Major Clients\n2 — Existing Clients\n3 — Potential Clients\n4 — Past Clients\n5 — ALL Contacts",
+        "additionalFields": {
+          "reply_markup": {
+            "keyboard": [
+              [
+                {
+                  "text": "1️⃣  Major Clients"
+                },
+                {
+                  "text": "2️⃣  Existing Clients"
+                }
+              ],
+              [
+                {
+                  "text": "3️⃣  Potential Clients"
+                },
+                {
+                  "text": "4️⃣  Past Clients"
+                }
+              ],
+              [
+                {
+                  "text": "5️⃣  ALL Contacts"
+                }
+              ]
+            ],
+            "resize_keyboard": true,
+            "one_time_keyboard": true
+          }
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "c668dd9f-85f8-41bf-9cbb-8000eda77211",
+      "name": "💾 Update Session — segment + awaiting_content",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1500,
+        250
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Session",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "admin_chat_id": "={{ $json.adminChatId }}",
+            "step": "awaiting_content",
+            "selected_segment": "={{ $json.selectedSegment }}"
+          }
+        },
+        "options": {
+          "locationDefine": "specifyRangeA1",
+          "rangeA1": "A:J",
+          "valueInputMode": "RAW"
+        }
+      },
+      "credentials": {},
+      "notes": "Update the row where admin_chat_id matches — sets step to awaiting_content"
+    },
+    {
+      "id": "bff47309-c32d-4db6-8959-3ea097bd75ab",
+      "name": "📤 Ask Admin to Send Content",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1700,
+        250
+      ],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.adminChatId }}",
+        "text": "✅ Segment: *{{ $json.selectedSegment === 'all' ? '🌍 ALL CONTACTS' : $json.selectedSegment.toUpperCase() }}*\n\n📎 *Now send your broadcast content.*\n\nYou can send:\n• 📝 A text message\n• 🖼️ An image or flyer _(with or without caption)_\n• 🎥 A video _(with or without caption)_\n• 📄 A document or PDF _(with or without caption)_\n• 🎤 A voice note or audio\n\n_Send it now ↓_",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_markup": {
+            "remove_keyboard": true
+          }
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "d7155da9-02f0-415d-9edc-260d96f2753c",
+      "name": "📦 STEP 2 — Process Incoming Content",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        500
+      ],
+      "parameters": {
+        "jsCode": "const incoming  = $json;\nconst session   = incoming.activeSession;\nconst adminChatId = incoming.adminChatId;\n\nif (!session) {\n  return [{ json: { error: 'no_session', adminChatId } }];\n}\n\nconst selectedSegment = session.selected_segment;\nconst contentType     = incoming.contentType;\nconst fileId          = incoming.fileId;\nconst caption         = incoming.caption || '';\nconst contentText     = incoming.rawText || '';\n\n// Build human-readable preview\nlet previewLine = '';\nif (contentType === 'text')     previewLine = `📝 Text: \"${contentText.substring(0, 120)}${contentText.length > 120 ? '...' : ''}\"`;\nif (contentType === 'photo')    previewLine = `🖼️ Image${caption ? `\\nCaption: \"${caption}\"` : ' (no caption)'}`;\nif (contentType === 'video')    previewLine = `🎥 Video${caption ? `\\nCaption: \"${caption}\"` : ' (no caption)'}`;\nif (contentType === 'document') previewLine = `📄 Document${caption ? `\\nCaption: \"${caption}\"` : ' (no caption)'}`;\nif (contentType === 'audio')    previewLine = `🎤 Voice/Audio message`;\n\nreturn [{\n  json: {\n    adminChatId,\n    selectedSegment,\n    contentType,\n    fileId,\n    contentText,\n    mediaCaption: caption,\n    previewLine\n  }\n}];"
+      },
+      "credentials": {}
+    },
+    {
+      "id": "e61cd448-b8f6-416d-9230-2f6009654091",
+      "name": "🔢 Count Contacts in Segment",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Count how many contacts match the selected segment\n// Reads from the pre-fetched contacts passed through\nconst segment   = $json.selectedSegment;\nconst adminChatId = $json.adminChatId;\n\n// Fetch contacts inline (in n8n: chain a Google Sheets getAll node before this)\nconst allContacts = $('📋 Read ALL Contacts — Count').all();\n\nconst EXCLUDED = ['do not contact'];\n\nconst count = allContacts.filter(item => {\n  const c   = item.json;\n  const tag = c.Tag?.toLowerCase()?.trim();\n  const optOut = c['WhatsApp Opt-Out'];\n  const phone  = c.Phone || '';\n  if (!phone.trim()) return false;\n  if (optOut === 'TRUE' || optOut === true) return false;\n  if (EXCLUDED.includes(tag)) return false;\n  if (segment === 'all') return true;\n  return tag === segment;\n}).length;\n\nreturn [{ json: { ...($json), matchCount: count } }];"
+      },
+      "credentials": {},
+      "notes": "In n8n: add a Google Sheets getAll node named '📋 Read ALL Contacts — Count' before this node"
+    },
+    {
+      "id": "2a9dc499-f33b-4d2f-97f3-89a4e504e230",
+      "name": "💾 Update Session — awaiting_confirm",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1300,
+        500
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Session",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "admin_chat_id": "={{ $json.adminChatId }}",
+            "step": "awaiting_confirm",
+            "content_type": "={{ $json.contentType }}",
+            "content_text": "={{ $json.contentText }}",
+            "media_file_id": "={{ $json.fileId }}",
+            "media_caption": "={{ $json.mediaCaption }}",
+            "media_type": "={{ $json.contentType }}"
+          }
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "f67e7891-e09c-42b1-840e-f3d2bc8c9204",
+      "name": "📋 Show Broadcast Preview + Confirm",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1500,
+        500
+      ],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.adminChatId }}",
+        "text": "📋 *Broadcast Preview*\n━━━━━━━━━━━━━━━━━━━\n🎯 Segment: *{{ $json.selectedSegment === 'all' ? '🌍 ALL CONTACTS' : $json.selectedSegment.toUpperCase() }}*\n👥 Recipients: *{{ $json.matchCount }} contacts*\n\n{{ $json.previewLine }}\n━━━━━━━━━━━━━━━━━━━━━\n\n*Ready to broadcast?*",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_markup": {
+            "keyboard": [
+              [
+                {
+                  "text": "✅ YES — SEND IT"
+                }
+              ],
+              [
+                {
+                  "text": "❌ CANCEL"
+                }
+              ]
+            ],
+            "resize_keyboard": true,
+            "one_time_keyboard": true
+          }
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "cb1b9aff-7c69-4d57-a8df-e8436a29fccd",
+      "name": "✅❌ STEP 3 — Yes or Cancel?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        700
+      ],
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.isYes }}",
+              "operation": "equal",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "a220453c-08b6-4a4e-bda5-79d84fdf4e65",
+      "name": "❌ Broadcast Cancelled",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1300,
+        800
+      ],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.adminChatId }}",
+        "text": "❌ Broadcast cancelled.\n\nSend any message to start a new broadcast.",
+        "additionalFields": {
+          "reply_markup": {
+            "remove_keyboard": true
+          }
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "a3793724-ff8b-49e4-a221-b102223e9967",
+      "name": "🗑 Clear Session — Cancelled",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Session",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "admin_chat_id": "={{ $json.adminChatId }}",
+            "step": "done",
+            "status": "cancelled"
+          }
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "fb4f7cab-9384-499f-a54f-3da58f0b4ecc",
+      "name": "📊 Fetch ALL Contacts Fresh",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        1300,
+        650
+      ],
+      "parameters": {
+        "operation": "getAll",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Contacts",
+        "returnAll": true
+      },
+      "credentials": {},
+      "notes": "Always fresh. Every broadcast reads the latest data from the sheet."
+    },
+    {
+      "id": "25caeda3-5fe5-4f8a-be97-24d95c3b3c4a",
+      "name": "🎯 Filter by Segment + Validate Phones",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1500,
+        650
+      ],
+      "parameters": {
+        "jsCode": "// Get session data for this admin\nconst allSessions = $('📋 Read Session Tab').all();\nconst adminChatId = $('🧠 Parse Message + Determine Step').first().json.adminChatId;\nconst session = allSessions.find(s =>\n  s.json.admin_chat_id === adminChatId && s.json.status === 'active'\n);\n\nconst segment    = session?.json?.selected_segment || 'all';\nconst cType      = session?.json?.content_type;\nconst cText      = session?.json?.content_text;\nconst fileId     = session?.json?.media_file_id;\nconst caption    = session?.json?.media_caption;\n\nconst EXCLUDED_TAGS = ['do not contact'];\nconst allContacts   = $input.all();\nconst results       = [];\n\nfor (const item of allContacts) {\n  const c      = item.json;\n  const tag    = c.Tag?.toLowerCase()?.trim();\n  const optOut = c['WhatsApp Opt-Out'];\n  const rawPhone = c.Phone || '';\n\n  // Skip blocked\n  if (optOut === 'TRUE' || optOut === true) continue;\n  if (EXCLUDED_TAGS.includes(tag)) continue;\n  if (!rawPhone.trim()) continue;\n\n  // Segment filter\n  if (segment !== 'all' && tag !== segment) continue;\n\n  // Normalize phone to WhatsApp E.164 (digits only, no +)\n  let phone = rawPhone.replace(/\\D/g, '');\n  if (phone.startsWith('0') && phone.length === 11) {\n    phone = '234' + phone.substring(1);\n  }\n  if (phone.length < 7 || phone.length > 15) continue; // invalid\n\n  results.push({\n    json: {\n      name:          c.Name || 'Contact',\n      phone,\n      originalPhone: rawPhone,\n      tag:           c.Tag,\n      segment,\n      contentType:   cType,\n      contentText:   cText,\n      fileId,\n      mediaCaption:  caption,\n      adminChatId\n    }\n  });\n}\n\nreturn results;"
+      },
+      "credentials": {}
+    },
+    {
+      "id": "41ca7682-7916-4dd2-bf08-da319e335cc2",
+      "name": "👥 Any Contacts Found?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1700,
+        650
+      ],
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $input.all().length }}",
+              "operation": "largerEqual",
+              "value2": 1
+            }
+          ]
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "7c97cb52-09f5-4996-b75f-4fc1cf7fac8f",
+      "name": "⚠️ No Contacts — Notify Admin",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.adminChatId }}",
+        "text": "⚠️ No contactable contacts found for segment: *{{ $json.segment }}*\n\nCheck the Contacts sheet and verify tags.\n\nSend any message to try again.",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "b91ea5de-7d85-4ee9-8033-53ba49c0b59b",
+      "name": "🚀 Notify Admin — Starting Now",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        1900,
+        580
+      ],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $json.adminChatId }}",
+        "text": "🚀 *Broadcast started!*\n\nSending to *{{ $input.all().length }} contacts*...\n_You will receive a summary when done._",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_markup": {
+            "remove_keyboard": true
+          }
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "e8f7c00c-7c87-4953-8fec-c6b994d5e381",
+      "name": "⏱ Rate Limit Delay (1s per message)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [
+        2100,
+        580
+      ],
+      "parameters": {
+        "amount": 1,
+        "unit": "seconds"
+      },
+      "credentials": {},
+      "notes": "Prevents WhatsApp rate limiting. Increase to 2s if issues arise."
+    },
+    {
+      "id": "6af10325-e4ff-4d90-82a2-aa7915d1ab6e",
+      "name": "🔀 Route by Content Type",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        2300,
+        580
+      ],
+      "parameters": {
+        "dataPropertyName": "={{ $json.contentType }}",
+        "rules": {
+          "rules": [
+            {
+              "value": "text",
+              "output": 0
+            },
+            {
+              "value": "photo",
+              "output": 1
+            },
+            {
+              "value": "video",
+              "output": 2
+            },
+            {
+              "value": "document",
+              "output": 3
+            },
+            {
+              "value": "audio",
+              "output": 4
+            }
+          ]
+        },
+        "fallbackOutput": 0
+      },
+      "credentials": {}
+    },
+    {
+      "id": "dacfa773-29c2-49d7-b271-f53a37436192",
+      "name": "💬 Send WhatsApp TEXT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2500,
+        400
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"messaging_product\": \"whatsapp\",\n  \"recipient_type\": \"individual\",\n  \"to\": \"{{ $json.phone }}\",\n  \"type\": \"text\",\n  \"text\": {\n    \"preview_url\": false,\n    \"body\": \"{{ $json.contentText }}\"\n  }\n}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "PLACEHOLDER_WHATSAPP_ID",
+          "name": "WhatsApp API"
+        }
+      }
+    },
+    {
+      "id": "66cad764-a13b-45b8-ba37-fe3a73b6a84d",
+      "name": "📥 Get Telegram File Path (Photo)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2500,
+        520
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/botYOUR_BOT_TOKEN/getFile?file_id={{ $json.fileId }}"
+      },
+      "credentials": {},
+      "notes": "Replace YOUR_BOT_TOKEN. Gets the download path for the image."
+    },
+    {
+      "id": "312bf920-f921-46f3-b83c-30d2e7c44eaf",
+      "name": "📥 Download Image Binary",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2700,
+        520
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/file/botYOUR_BOT_TOKEN/{{ $json.result.file_path }}",
+        "responseFormat": "file"
+      },
+      "credentials": {}
+    },
+    {
+      "id": "fa3ccfdc-0331-45b8-adf6-00c707f1b104",
+      "name": "☁️ Upload to WhatsApp Media API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2900,
+        520
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/media",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "messaging_product",
+              "value": "whatsapp"
+            },
+            {
+              "name": "type",
+              "value": "image/jpeg"
+            },
+            {
+              "name": "file",
+              "value": "={{ $binary.data }}",
+              "parameterType": "formBinaryData"
+            }
+          ]
+        }
+      },
+      "credentials": {},
+      "notes": "Returns {id: 'MEDIA_ID'}. Store this for the send step."
+    },
+    {
+      "id": "41f41a26-2388-437e-a486-1cb21e3adab6",
+      "name": "🖼️ Send WhatsApp IMAGE",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        3100,
+        520
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"messaging_product\": \"whatsapp\",\n  \"recipient_type\": \"individual\",\n  \"to\": \"{{ $('🎯 Filter by Segment + Validate Phones').item.json.phone }}\",\n  \"type\": \"image\",\n  \"image\": {\n    \"id\": \"{{ $json.id }}\"\n    {{ $('🎯 Filter by Segment + Validate Phones').item.json.mediaCaption ? ',\"caption\": \"' + $('🎯 Filter by Segment + Validate Phones').item.json.mediaCaption + '\"' : '' }}\n  }\n}"
+      },
+      "credentials": {},
+      "notes": "Upload once, reuse media_id for all contacts to avoid re-uploading same file"
+    },
+    {
+      "id": "fe3ba325-74f8-4ea7-bf92-34ac53652aeb",
+      "name": "🎥 Send WhatsApp VIDEO",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2500,
+        640
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"messaging_product\": \"whatsapp\",\n  \"recipient_type\": \"individual\",\n  \"to\": \"{{ $json.phone }}\",\n  \"type\": \"video\",\n  \"video\": {\n    \"id\": \"{{ $json.uploadedMediaId }}\"\n    {{ $json.mediaCaption ? ',\"caption\": \"' + $json.mediaCaption + '\"' : '' }}\n  }\n}"
+      },
+      "credentials": {},
+      "notes": "Same 3-step flow as photo: getFile → download → upload to WA → send. See media-send-guide.md"
+    },
+    {
+      "id": "7e7ad8ce-bd3c-4aca-b5e4-38306c2e6648",
+      "name": "📄 Send WhatsApp DOCUMENT",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2500,
+        760
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"messaging_product\": \"whatsapp\",\n  \"recipient_type\": \"individual\",\n  \"to\": \"{{ $json.phone }}\",\n  \"type\": \"document\",\n  \"document\": {\n    \"id\": \"{{ $json.uploadedMediaId }}\",\n    \"filename\": \"Kamilight_Update.pdf\"\n    {{ $json.mediaCaption ? ',\"caption\": \"' + $json.mediaCaption + '\"' : '' }}\n  }\n}"
+      },
+      "credentials": {}
+    },
+    {
+      "id": "42cba55d-abe5-49cc-923b-f48584e5b83d",
+      "name": "🎤 Send WhatsApp AUDIO",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2500,
+        880
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"messaging_product\": \"whatsapp\",\n  \"recipient_type\": \"individual\",\n  \"to\": \"{{ $json.phone }}\",\n  \"type\": \"audio\",\n  \"audio\": {\n    \"id\": \"{{ $json.uploadedMediaId }}\"\n  }\n}"
+      },
+      "credentials": {}
+    },
+    {
+      "id": "8803253c-d2c8-420d-91f1-2372f69b1034",
+      "name": "📝 Log Every Send to Sheets",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3300,
+        580
+      ],
+      "parameters": {
+        "operation": "append",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ new Date().toISOString() }}",
+            "Contact Name": "={{ $('🎯 Filter by Segment + Validate Phones').item.json.name }}",
+            "Phone": "={{ $('🎯 Filter by Segment + Validate Phones').item.json.phone }}",
+            "Tag": "={{ $('🎯 Filter by Segment + Validate Phones').item.json.tag }}",
+            "Segment Targeted": "={{ $('🎯 Filter by Segment + Validate Phones').item.json.segment }}",
+            "Content Type": "={{ $('🎯 Filter by Segment + Validate Phones').item.json.contentType }}",
+            "Caption/Message": "={{ $('🎯 Filter by Segment + Validate Phones').item.json.mediaCaption || $('🎯 Filter by Segment + Validate Phones').item.json.contentText || '' }}",
+            "Status": "={{ $json.error ? 'failed' : 'sent' }}",
+            "Workflow": "Phase 1 Broadcast v2"
+          }
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "43fc00ab-0e53-4162-9610-d5f780eb93c3",
+      "name": "📅 Update Last Contacted",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3500,
+        580
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Contacts",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $('🎯 Filter by Segment + Validate Phones').item.json.originalPhone }}",
+            "Last Contacted": "={{ new Date().toISOString().split('T')[0] }}"
+          }
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "710a8a9f-0367-4e73-a66f-e42f8697609a",
+      "name": "✅ Final Summary to Admin",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [
+        3700,
+        580
+      ],
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "={{ $('🧠 Parse Message + Determine Step').first().json.adminChatId }}",
+        "text": "✅ *Broadcast Complete!*\n━━━━━━━━━━━━━━━━━━━\n🎯 Segment: *{{ $('🎯 Filter by Segment + Validate Phones').first().json.segment.toUpperCase() }}*\n📤 Total sent: *{{ $('🎯 Filter by Segment + Validate Phones').all().length }} contacts*\n📎 Format: *{{ $('🎯 Filter by Segment + Validate Phones').first().json.contentType }}*\n🕐 *{{ new Date().toLocaleString('en-NG', {timeZone: 'Africa/Lagos'}) }}*\n━━━━━━━━━━━━━━━━━━━━━\n\n_Full log available in Google Sheets → Logs tab_\n\nSend any message to start a new broadcast.",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "reply_markup": {
+            "remove_keyboard": true
+          }
+        }
+      },
+      "credentials": {},
+      "notes": "executeOnce: true — send this once after the loop, not per contact"
+    },
+    {
+      "id": "fac25f4e-d8c4-4626-91d3-ff9f6a2d11be",
+      "name": "🗑 Clear Session — Done",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        3900,
+        580
+      ],
+      "parameters": {
+        "operation": "update",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Session",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "admin_chat_id": "={{ $('🧠 Parse Message + Determine Step').first().json.adminChatId }}",
+            "step": "done",
+            "status": "done"
+          }
+        }
+      },
+      "credentials": {}
+    },
+    {
+      "id": "05f08d55-293d-47a9-a6c0-b2c13f1eee51",
+      "name": "📋 Read ALL Contacts — Count",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [
+        900,
+        500
+      ],
+      "parameters": {
+        "operation": "getAll",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Contacts",
+        "returnAll": true
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "PLACEHOLDER_SHEETS_ID",
+          "name": "Google Sheets"
+        }
+      }
+    },
+    {
+      "id": "e82d0ec9-7851-4f29-ad76-ad7610976d1f",
+      "name": "📥 Get Telegram File (video)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2500,
+        600
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/botYOUR_BOT_TOKEN/getFile?file_id={{ $json.fileId }}"
+      }
+    },
+    {
+      "id": "4558c6b6-4d47-4d93-a9d4-274182561b86",
+      "name": "📥 Download Binary (video)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2700,
+        600
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/file/botYOUR_BOT_TOKEN/{{ $json.result.file_path }}",
+        "responseFormat": "file"
+      }
+    },
+    {
+      "id": "fda1846a-0c82-4899-bc97-d8239136a90c",
+      "name": "☁️ Upload to WhatsApp (video)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2900,
+        600
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/media",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "messaging_product",
+              "value": "whatsapp"
+            },
+            {
+              "name": "type",
+              "value": "video/mp4"
+            },
+            {
+              "name": "file",
+              "value": "={{ $binary.data }}",
+              "parameterType": "formBinaryData"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "PLACEHOLDER_WHATSAPP_ID",
+          "name": "WhatsApp API"
+        }
+      }
+    },
+    {
+      "id": "4f9f8906-ce95-4157-bd14-4fe803ca8738",
+      "name": "📥 Get Telegram File (document)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2500,
+        600
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/botYOUR_BOT_TOKEN/getFile?file_id={{ $json.fileId }}"
+      }
+    },
+    {
+      "id": "efa9f512-2ad8-435e-a852-480485812162",
+      "name": "📥 Download Binary (document)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2700,
+        600
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/file/botYOUR_BOT_TOKEN/{{ $json.result.file_path }}",
+        "responseFormat": "file"
+      }
+    },
+    {
+      "id": "03e0f885-1f66-43b3-90a4-41a94c6fb72e",
+      "name": "☁️ Upload to WhatsApp (document)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2900,
+        600
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/media",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "messaging_product",
+              "value": "whatsapp"
+            },
+            {
+              "name": "type",
+              "value": "application/pdf"
+            },
+            {
+              "name": "file",
+              "value": "={{ $binary.data }}",
+              "parameterType": "formBinaryData"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "PLACEHOLDER_WHATSAPP_ID",
+          "name": "WhatsApp API"
+        }
+      }
+    },
+    {
+      "id": "5d2200e5-a7ac-4f48-9327-0baced19d1d7",
+      "name": "📥 Get Telegram File (audio)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2500,
+        600
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/botYOUR_BOT_TOKEN/getFile?file_id={{ $json.fileId }}"
+      }
+    },
+    {
+      "id": "0b5d36ae-6316-4fa4-ad4d-208ca18bdd07",
+      "name": "📥 Download Binary (audio)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2700,
+        600
+      ],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.telegram.org/file/botYOUR_BOT_TOKEN/{{ $json.result.file_path }}",
+        "responseFormat": "file"
+      }
+    },
+    {
+      "id": "d2c7527e-d715-42a6-8855-46f8c9063610",
+      "name": "☁️ Upload to WhatsApp (audio)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        2900,
+        600
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/media",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "messaging_product",
+              "value": "whatsapp"
+            },
+            {
+              "name": "type",
+              "value": "audio/ogg"
+            },
+            {
+              "name": "file",
+              "value": "={{ $binary.data }}",
+              "parameterType": "formBinaryData"
+            }
+          ]
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "PLACEHOLDER_WHATSAPP_ID",
+          "name": "WhatsApp API"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "📡 Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "🔐 Admin Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔐 Admin Gate": {
+      "main": [
+        [
+          {
+            "node": "📋 Read Session Tab",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "⛔ Reject Unauthorized",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Read Session Tab": {
+      "main": [
+        [
+          {
+            "node": "🧠 Parse Message + Determine Step",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🧠 Parse Message + Determine Step": {
+      "main": [
+        [
+          {
+            "node": "🔀 Route by Current Step",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Route by Current Step": {
+      "main": [
+        [
+          {
+            "node": "📢 STEP 0 — Show Segment Menu",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "🗂 STEP 1 — Parse Segment Selection",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📦 STEP 2 — Process Incoming Content",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "✅❌ STEP 3 — Yes or Cancel?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📢 STEP 0 — Show Segment Menu": {
+      "main": [
+        [
+          {
+            "node": "💾 Save Session — awaiting_segment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🗂 STEP 1 — Parse Segment Selection": {
+      "main": [
+        [
+          {
+            "node": "❓ Valid Segment?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❓ Valid Segment?": {
+      "main": [
+        [
+          {
+            "node": "💾 Update Session — segment + awaiting_content",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "⚠️ Invalid Segment — Re-prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Update Session — segment + awaiting_content": {
+      "main": [
+        [
+          {
+            "node": "📤 Ask Admin to Send Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📦 STEP 2 — Process Incoming Content": {
+      "main": [
+        [
+          {
+            "node": "📋 Read ALL Contacts — Count",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📋 Read ALL Contacts — Count": {
+      "main": [
+        [
+          {
+            "node": "🔢 Count Contacts in Segment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔢 Count Contacts in Segment": {
+      "main": [
+        [
+          {
+            "node": "💾 Update Session — awaiting_confirm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Update Session — awaiting_confirm": {
+      "main": [
+        [
+          {
+            "node": "📋 Show Broadcast Preview + Confirm",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅❌ STEP 3 — Yes or Cancel?": {
+      "main": [
+        [
+          {
+            "node": "→ n10 Read Contacts + Begin Broadcast",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📊 Fetch ALL Contacts Fresh",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌ Broadcast Cancelled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "❌ Broadcast Cancelled": {
+      "main": [
+        [
+          {
+            "node": "🗑 Clear Session — Cancelled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Fetch ALL Contacts Fresh": {
+      "main": [
+        [
+          {
+            "node": "🎯 Filter by Segment + Validate Phones",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🎯 Filter by Segment + Validate Phones": {
+      "main": [
+        [
+          {
+            "node": "👥 Any Contacts Found?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "👥 Any Contacts Found?": {
+      "main": [
+        [
+          {
+            "node": "🚀 Notify Admin — Starting Now",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "⚠️ No Contacts — Notify Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🚀 Notify Admin — Starting Now": {
+      "main": [
+        [
+          {
+            "node": "⏱ Rate Limit Delay (1s per message)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏱ Rate Limit Delay (1s per message)": {
+      "main": [
+        [
+          {
+            "node": "🔀 Route by Content Type",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔀 Route by Content Type": {
+      "main": [
+        [
+          {
+            "node": "💬 Send WhatsApp TEXT",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Get Telegram File Path (Photo)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Get Telegram File (video)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Get Telegram File (document)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "📥 Get Telegram File (audio)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Get Telegram File Path (Photo)": {
+      "main": [
+        [
+          {
+            "node": "📥 Download Image Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Download Image Binary": {
+      "main": [
+        [
+          {
+            "node": "☁️ Upload to WhatsApp Media API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "☁️ Upload to WhatsApp Media API": {
+      "main": [
+        [
+          {
+            "node": "🖼️ Send WhatsApp IMAGE",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Get Telegram File (video)": {
+      "main": [
+        [
+          {
+            "node": "📥 Download Binary (video)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Download Binary (video)": {
+      "main": [
+        [
+          {
+            "node": "☁️ Upload to WhatsApp (video)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "☁️ Upload to WhatsApp (video)": {
+      "main": [
+        [
+          {
+            "node": "🎥 Send WhatsApp VIDEO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Get Telegram File (document)": {
+      "main": [
+        [
+          {
+            "node": "📥 Download Binary (document)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Download Binary (document)": {
+      "main": [
+        [
+          {
+            "node": "☁️ Upload to WhatsApp (document)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "☁️ Upload to WhatsApp (document)": {
+      "main": [
+        [
+          {
+            "node": "📄 Send WhatsApp DOCUMENT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Get Telegram File (audio)": {
+      "main": [
+        [
+          {
+            "node": "📥 Download Binary (audio)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📥 Download Binary (audio)": {
+      "main": [
+        [
+          {
+            "node": "☁️ Upload to WhatsApp (audio)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "☁️ Upload to WhatsApp (audio)": {
+      "main": [
+        [
+          {
+            "node": "🎤 Send WhatsApp AUDIO",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💬 Send WhatsApp TEXT": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Every Send to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🖼️ Send WhatsApp IMAGE": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Every Send to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🎥 Send WhatsApp VIDEO": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Every Send to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📄 Send WhatsApp DOCUMENT": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Every Send to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🎤 Send WhatsApp AUDIO": {
+      "main": [
+        [
+          {
+            "node": "📝 Log Every Send to Sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📝 Log Every Send to Sheets": {
+      "main": [
+        [
+          {
+            "node": "📅 Update Last Contacted",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📅 Update Last Contacted": {
+      "main": [
+        [
+          {
+            "node": "✅ Final Summary to Admin",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ Final Summary to Admin": {
+      "main": [
+        [
+          {
+            "node": "🗑 Clear Session — Done",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "238bfb67-4a2e-44f0-8134-cca3599f6280"
+}

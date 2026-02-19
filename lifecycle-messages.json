@@ -1,0 +1,99 @@
+{
+  "_meta": {
+    "name": "Kamilight — Phase 4: Customer Lifecycle Automation",
+    "description": "Weekly/monthly messaging to active and past clients for retention, repeat business, and re-engagement",
+    "version": "1.0.0"
+  },
+
+  "lifecycle_triggers": {
+    "weekly_check_in": {
+      "schedule": "Every Monday 9AM",
+      "targets": ["active client"],
+      "message": "Good morning {name}! Hope your week is starting well. Any freight needs we can help with this week? We're here. — Kamilight Team"
+    },
+    "monthly_update": {
+      "schedule": "1st of every month",
+      "targets": ["active client"],
+      "message": "Hi {name}, a quick update from Kamilight — we've expanded to new routes this month. Your business deserves the best options. Let us know if you'd like to review your logistics plan."
+    },
+    "quarterly_reengagement": {
+      "schedule": "Every 90 days",
+      "targets": ["past client"],
+      "message": "Hello {name}, it's been a while since we worked together. We've improved a lot — faster routes, better pricing. Can we reconnect and explore how we can serve you again?"
+    },
+    "shipment_anniversary": {
+      "schedule": "Custom per contact",
+      "targets": ["active client"],
+      "message": "Hi {name}, it's been a great journey partnering with Kamilight. Thank you for your continued trust. We're committed to keeping your supply chain moving."
+    }
+  },
+
+  "nodes": [
+    {
+      "id": "node_1",
+      "name": "Weekly Monday Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 9 * * 1" }] }
+      }
+    },
+
+    {
+      "id": "node_2",
+      "name": "Read Active Clients",
+      "type": "n8n-nodes-base.googleSheets",
+      "parameters": {
+        "operation": "getAll",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Contacts",
+        "returnAll": true
+      }
+    },
+
+    {
+      "id": "node_3",
+      "name": "Filter Active Clients",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "jsCode": "const contacts = $input.all();\nconst results = [];\n\nfor (const item of contacts) {\n  const c = item.json;\n  const tag = c.Tag?.toLowerCase()?.trim();\n  const optOut = c['WhatsApp Opt-Out'];\n\n  if (tag !== 'active client') continue;\n  if (optOut === 'TRUE' || optOut === true) continue;\n\n  let phone = (c.Phone || '').replace(/\\D/g, '');\n  if (phone.startsWith('0') && phone.length === 11) phone = '234' + phone.substring(1);\n  if (phone.length < 7 || phone.length > 15) continue;\n\n  const name = c.Name?.split(' ')[0] || 'there';\n  const message = `Good morning ${name}! Hope your week is starting well. Any freight needs we can help with this week? We're here whenever you need us. — Kamilight Team`;\n\n  results.push({\n    json: { name: c.Name, first_name: name, phone, tag, message, row_phone: c.Phone }\n  });\n}\n\nreturn results;"
+      }
+    },
+
+    {
+      "id": "node_4",
+      "name": "Send Lifecycle Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{ $json.phone }}\",\n  \"type\": \"text\",\n  \"text\": { \"body\": \"{{ $json.message }}\" }\n}"
+      },
+      "continueOnFail": true
+    },
+
+    {
+      "id": "node_5",
+      "name": "Log Lifecycle Send",
+      "type": "n8n-nodes-base.googleSheets",
+      "parameters": {
+        "operation": "append",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ new Date().toISOString() }}",
+            "Contact Name": "={{ $json.name }}",
+            "Phone": "={{ $json.phone }}",
+            "Tag": "={{ $json.tag }}",
+            "Message Sent": "={{ $json.message }}",
+            "Status": "sent",
+            "Workflow": "Phase 4 — Lifecycle"
+          }
+        }
+      }
+    }
+  ]
+}

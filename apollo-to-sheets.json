@@ -1,0 +1,125 @@
+{
+  "_meta": {
+    "name": "Kamilight — Phase 2: Apollo.io Lead Generation",
+    "description": "Daily cron → Apollo API → filter → score leads → append to Google Sheets with auto-tag",
+    "version": "1.0.0",
+    "schedule": "Runs daily at 8:00 AM"
+  },
+
+  "apollo_search_strategy": {
+    "target_industries": ["transportation", "logistics", "manufacturing", "retail", "import_export"],
+    "target_titles": ["CEO", "COO", "Supply Chain Manager", "Logistics Manager", "Operations Director", "Procurement Manager"],
+    "target_locations": ["Nigeria", "Ghana", "Kenya", "South Africa", "Senegal"],
+    "company_size": "10-500 employees",
+    "notes": "Adjust these in the Apollo API call node based on Kamilight's target market"
+  },
+
+  "lead_scoring_rules": {
+    "high_value": {
+      "score_threshold": 70,
+      "tag": "high potential",
+      "criteria": "CEO/COO title + company size > 50 + logistics/manufacturing industry"
+    },
+    "warm": {
+      "score_threshold": 40,
+      "tag": "warm",
+      "criteria": "Manager-level title + relevant industry"
+    },
+    "cold": {
+      "score_threshold": 0,
+      "tag": "cold",
+      "criteria": "All other leads"
+    }
+  },
+
+  "nodes": [
+    {
+      "id": "node_1",
+      "name": "Daily Cron Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 8 * * 1-5" }]
+        }
+      },
+      "notes": "Runs Mon–Fri at 8AM. Adjust timezone in n8n settings."
+    },
+
+    {
+      "id": "node_2",
+      "name": "Fetch Leads from Apollo",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apollo.io/v1/mixed_people/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Cache-Control", "value": "no-cache" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "json",
+        "body": "{\n  \"api_key\": \"YOUR_APOLLO_API_KEY\",\n  \"q_keywords\": \"logistics freight supply chain\",\n  \"person_titles\": [\"CEO\", \"COO\", \"Logistics Manager\", \"Supply Chain Manager\", \"Operations Director\"],\n  \"person_locations\": [\"Nigeria\", \"Ghana\", \"Kenya\"],\n  \"organization_industry_tag_ids\": [],\n  \"page\": 1,\n  \"per_page\": 25\n}"
+      },
+      "notes": "Returns up to 25 leads. Change page to paginate. Stay within Apollo plan limits."
+    },
+
+    {
+      "id": "node_3",
+      "name": "Extract and Score Leads",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\nconst people = response.people || [];\nconst results = [];\n\nfor (const person of people) {\n  let score = 0;\n\n  // Score based on title\n  const title = (person.title || '').toLowerCase();\n  if (title.includes('ceo') || title.includes('coo') || title.includes('director')) score += 40;\n  else if (title.includes('manager')) score += 20;\n  else score += 5;\n\n  // Score based on company size\n  const empRange = person.organization?.estimated_num_employees || 0;\n  if (empRange > 200) score += 30;\n  else if (empRange > 50) score += 20;\n  else if (empRange > 10) score += 10;\n\n  // Score based on industry relevance\n  const industry = (person.organization?.industry || '').toLowerCase();\n  if (industry.includes('logistics') || industry.includes('transport')) score += 30;\n  else if (industry.includes('manufacturing') || industry.includes('retail')) score += 20;\n  else score += 0;\n\n  // Assign tag\n  let tag = 'cold';\n  if (score >= 70) tag = 'high potential';\n  else if (score >= 40) tag = 'warm';\n\n  // Get best phone (Apollo may have mobile)\n  const phone = person.phone_numbers?.[0]?.sanitized_number || '';\n  \n  if (!phone) continue; // Skip if no phone — WhatsApp requires phone\n\n  results.push({\n    json: {\n      Name: person.name || '',\n      Phone: phone,\n      Company: person.organization?.name || '',\n      Tag: tag,\n      Stage: 'lead',\n      Source: 'apollo',\n      'Last Contacted': '',\n      'Follow-up Due': '',\n      'Response Status': 'no_reply',\n      Notes: `Title: ${person.title || 'N/A'} | Score: ${score}`,\n      'Assigned To': '',\n      'Created Date': new Date().toISOString().split('T')[0],\n      'WhatsApp Opt-Out': 'FALSE',\n      'Apollo ID': person.id || '',\n      'Lead Score': score,\n      Industry: person.organization?.industry || '',\n      Country: person.country || '',\n      Email: person.email || ''\n    }\n  });\n}\n\nreturn results;"
+      }
+    },
+
+    {
+      "id": "node_4",
+      "name": "Read Existing Leads (Dedup Check)",
+      "type": "n8n-nodes-base.googleSheets",
+      "parameters": {
+        "operation": "getAll",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Leads",
+        "returnAll": true
+      },
+      "notes": "Read existing leads to avoid duplicates"
+    },
+
+    {
+      "id": "node_5",
+      "name": "Deduplicate",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "jsCode": "const newLeads = $('Extract and Score Leads').all();\nconst existingLeads = $input.all();\n\n// Build set of existing Apollo IDs and phones\nconst existingApolloIds = new Set(existingLeads.map(l => l.json['Apollo ID']).filter(Boolean));\nconst existingPhones = new Set(existingLeads.map(l => l.json.Phone).filter(Boolean));\n\nconst unique = newLeads.filter(lead => {\n  const apolloId = lead.json['Apollo ID'];\n  const phone = lead.json.Phone;\n  return !existingApolloIds.has(apolloId) && !existingPhones.has(phone);\n});\n\nreturn unique;"
+      }
+    },
+
+    {
+      "id": "node_6",
+      "name": "Append New Leads to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "parameters": {
+        "operation": "append",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Leads",
+        "columns": {
+          "mappingMode": "autoMapInputData"
+        }
+      }
+    },
+
+    {
+      "id": "node_7",
+      "name": "Notify Admin of New Leads",
+      "type": "n8n-nodes-base.telegram",
+      "parameters": {
+        "operation": "sendMessage",
+        "chatId": "YOUR_ADMIN_TELEGRAM_CHAT_ID",
+        "text": "📋 Lead Gen Complete!\n\nNew leads added to Leads tab: {{ $input.all().length }}\n\nBreakdown by tag:\n• High Potential: {{ $input.all().filter(l => l.json.Tag === 'high potential').length }}\n• Warm: {{ $input.all().filter(l => l.json.Tag === 'warm').length }}\n• Cold: {{ $input.all().filter(l => l.json.Tag === 'cold').length }}\n\nReview and promote good ones to Contacts tab when ready."
+      }
+    }
+  ]
+}

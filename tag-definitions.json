@@ -1,0 +1,56 @@
+{
+  "_comment": "Single source of truth for all tags used in automation logic",
+  
+  "allowed_tags": [
+    "potential client",
+    "high potential",
+    "active client",
+    "past client",
+    "cold",
+    "warm",
+    "do not contact"
+  ],
+
+  "broadcast_eligible_tags": [
+    "potential client",
+    "high potential",
+    "active client",
+    "past client",
+    "cold",
+    "warm"
+  ],
+
+  "never_contact_tags": [
+    "do not contact"
+  ],
+
+  "follow_up_eligible_tags": [
+    "potential client",
+    "high potential",
+    "cold",
+    "warm"
+  ],
+
+  "lifecycle_messaging_tags": [
+    "active client",
+    "past client"
+  ],
+
+  "tag_descriptions": {
+    "potential client": "New contact, not yet messaged or engaged",
+    "high potential": "Strong lead — referred, showed interest, or high-value company",
+    "active client": "Currently using Kamilight services",
+    "past client": "Previously used services, lapsed — target for re-engagement",
+    "cold": "Imported from Apollo, no prior contact",
+    "warm": "Has responded or engaged at some point",
+    "do not contact": "Opted out or admin-flagged — NEVER send messages"
+  },
+
+  "tag_upgrade_rules": {
+    "cold": "Upgrade to 'warm' if they reply to any message",
+    "warm": "Upgrade to 'potential client' if they request a quote",
+    "potential client": "Upgrade to 'active client' when first shipment is booked",
+    "active client": "Downgrade to 'past client' if no activity for 90 days",
+    "past client": "Upgrade to 'active client' when they re-engage"
+  }
+}

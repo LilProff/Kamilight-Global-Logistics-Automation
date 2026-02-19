@@ -1,0 +1,145 @@
+{
+  "_meta": {
+    "name": "Kamilight — Phase 3: Automated Follow-Up Engine",
+    "description": "Hourly check → finds contacts whose follow-up is due → sends WhatsApp → updates Sheet → notifies admin of replies",
+    "version": "1.0.0",
+    "schedule": "Runs every hour"
+  },
+
+  "follow_up_intervals": {
+    "cold": 14,
+    "warm": 7,
+    "potential client": 5,
+    "high potential": 3,
+    "notes": "Days since Last Contacted before follow-up triggers. Adjust in Config tab."
+  },
+
+  "follow_up_messages": {
+    "cold": "Hello {name}, just checking in from Kamilight Global Logistics. We help businesses move cargo efficiently across Africa. Would you be open to a quick conversation about your freight needs?",
+    "warm": "Hi {name}, following up from Kamilight. We'd love to help with your logistics. Do you have 10 minutes to connect this week?",
+    "potential client": "Hello {name}, this is Kamilight Global Logistics. We reached out earlier about freight solutions. Are you still exploring options? We have competitive rates available.",
+    "high potential": "Hi {name}, our team has been working on a proposal tailored to your business. Can we share it with you this week?"
+  },
+
+  "nodes": [
+    {
+      "id": "node_1",
+      "name": "Hourly Cron",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "cronExpression", "expression": "0 * * * 1-5" }]
+        }
+      }
+    },
+
+    {
+      "id": "node_2",
+      "name": "Read All Contacts",
+      "type": "n8n-nodes-base.googleSheets",
+      "parameters": {
+        "operation": "getAll",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Contacts",
+        "returnAll": true
+      }
+    },
+
+    {
+      "id": "node_3",
+      "name": "Find Follow-Up Due",
+      "type": "n8n-nodes-base.code",
+      "parameters": {
+        "jsCode": "const contacts = $input.all();\nconst today = new Date();\ntoday.setHours(0,0,0,0);\n\nconst INTERVALS = {\n  'cold': 14,\n  'warm': 7,\n  'potential client': 5,\n  'high potential': 3\n};\n\nconst FOLLOW_UP_ELIGIBLE = ['cold', 'warm', 'potential client', 'high potential'];\n\nconst FOLLOW_UP_MESSAGES = {\n  'cold': 'Hello {name}, just checking in from Kamilight Global Logistics. We help businesses move cargo efficiently across Africa. Would you be open to a quick conversation about your freight needs?',\n  'warm': 'Hi {name}, following up from Kamilight. We have capacity this month and competitive rates. Are you still looking for a freight partner?',\n  'potential client': 'Hello {name}, this is Kamilight Global Logistics. Are you still exploring freight solutions? We have a new offer we\\'d love to share with you.',\n  'high potential': 'Hi {name}, our team has prepared a proposal for your business. Can we share it this week?'\n};\n\nconst due = [];\n\nfor (const item of contacts) {\n  const c = item.json;\n  const tag = c.Tag?.toLowerCase()?.trim();\n  const optOut = c['WhatsApp Opt-Out'];\n  const responseStatus = c['Response Status']?.toLowerCase();\n\n  // Only follow up with eligible tags\n  if (!FOLLOW_UP_ELIGIBLE.includes(tag)) continue;\n  \n  // Skip opt-outs\n  if (optOut === 'TRUE' || optOut === true) continue;\n  \n  // Skip if already responded positively\n  if (responseStatus === 'interested' || responseStatus === 'not_interested') continue;\n  \n  // Check if follow-up is due\n  const lastContacted = c['Last Contacted'];\n  const interval = INTERVALS[tag] || 7;\n  \n  let isDue = false;\n  if (!lastContacted || lastContacted.trim() === '') {\n    // Never contacted — definitely due\n    isDue = true;\n  } else {\n    const lastDate = new Date(lastContacted);\n    const daysSince = Math.floor((today - lastDate) / (1000 * 60 * 60 * 24));\n    isDue = daysSince >= interval;\n  }\n\n  if (!isDue) continue;\n  \n  // Format phone\n  let phone = (c.Phone || '').replace(/\\D/g, '');\n  if (phone.startsWith('0') && phone.length === 11) phone = '234' + phone.substring(1);\n  if (phone.length < 7 || phone.length > 15) continue;\n\n  // Personalize message\n  const name = c.Name?.split(' ')[0] || 'there';\n  const template = FOLLOW_UP_MESSAGES[tag] || FOLLOW_UP_MESSAGES['cold'];\n  const message = template.replace('{name}', name);\n\n  due.push({\n    json: {\n      name: c.Name,\n      first_name: name,\n      phone,\n      tag,\n      message,\n      row_phone: c.Phone // Original for sheet update\n    }\n  });\n}\n\nif (due.length === 0) {\n  // Return empty signal\n  return [{ json: { no_followups_due: true, checked_at: today.toISOString() } }];\n}\n\nreturn due;"
+      }
+    },
+
+    {
+      "id": "node_4",
+      "name": "Check if Any Due",
+      "type": "n8n-nodes-base.if",
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            { "value1": "={{ $json.no_followups_due }}", "operation": "notEqual", "value2": true }
+          ]
+        }
+      }
+    },
+
+    {
+      "id": "node_5",
+      "name": "Wait 2 Seconds",
+      "type": "n8n-nodes-base.wait",
+      "parameters": { "amount": 2, "unit": "seconds" }
+    },
+
+    {
+      "id": "node_6",
+      "name": "Send Follow-Up WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v18.0/YOUR_PHONE_NUMBER_ID/messages",
+        "sendBody": true,
+        "contentType": "json",
+        "body": "={\n  \"messaging_product\": \"whatsapp\",\n  \"recipient_type\": \"individual\",\n  \"to\": \"{{ $json.phone }}\",\n  \"type\": \"text\",\n  \"text\": {\n    \"body\": \"{{ $json.message }}\"\n  }\n}"
+      },
+      "continueOnFail": true
+    },
+
+    {
+      "id": "node_7",
+      "name": "Update Last Contacted",
+      "type": "n8n-nodes-base.googleSheets",
+      "parameters": {
+        "operation": "update",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Contacts",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Phone": "={{ $json.row_phone }}",
+            "Last Contacted": "={{ new Date().toISOString().split('T')[0] }}"
+          }
+        }
+      }
+    },
+
+    {
+      "id": "node_8",
+      "name": "Log Follow-Up",
+      "type": "n8n-nodes-base.googleSheets",
+      "parameters": {
+        "operation": "append",
+        "documentId": "YOUR_GOOGLE_SHEET_ID",
+        "sheetName": "Logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Timestamp": "={{ new Date().toISOString() }}",
+            "Contact Name": "={{ $json.name }}",
+            "Phone": "={{ $json.phone }}",
+            "Tag": "={{ $json.tag }}",
+            "Message Sent": "={{ $json.message }}",
+            "Status": "={{ $('Send Follow-Up WhatsApp').item.json.messages ? 'sent' : 'failed' }}",
+            "Workflow": "Phase 3 — Follow-Up"
+          }
+        }
+      }
+    }
+  ],
+
+  "incoming_reply_handler": {
+    "description": "Separate webhook workflow to handle WhatsApp replies",
+    "trigger": "WhatsApp sends POST to your webhook URL when contact replies",
+    "actions": [
+      "Extract sender phone and message",
+      "Find contact in Google Sheets by phone",
+      "Update Response Status to 'responded'",
+      "Send Telegram notification to admin with contact name + their reply",
+      "Admin decides next step manually"
+    ],
+    "admin_notification_format": "📩 Reply from {name} ({phone}):\n\n\"{their_message}\"\n\nTag: {tag}\nAction: Reply via WhatsApp or update their stage in the sheet."
+  }
+}

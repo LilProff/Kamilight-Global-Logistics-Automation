@@ -1,0 +1,129 @@
+{
+  "nodes": [
+    {
+      "id": "Telegram Trigger",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [200, 300],
+      "parameters": {
+        "updates": ["message"]
+      }
+    },
+    {
+      "id": "Extract Tag",
+      "name": "Extract Tag",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [400, 300],
+      "parameters": {
+        "functionCode": "const text = $json.message.text;\nconst match = text.match(/tag=(\\w+)/);\nreturn [{ tag: match ? match[1] : null }];"
+      }
+    },
+    {
+      "id": "Read Sheet",
+      "name": "Read Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [600, 300],
+      "parameters": {
+        "operation": "read",
+        "sheetId": "YOUR_GOOGLE_SHEET_ID",
+        "range": "Sheet1!A:D"
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_CREDS_ID",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "id": "Filter Contacts",
+      "name": "Filter Contacts",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [800, 300],
+      "parameters": {
+        "functionCode": "const tag = $items(\"Extract Tag\")[0].json.tag;\nreturn items.filter(i => i.json.tag === tag && i.json.status !== 'sent');"
+      }
+    },
+    {
+      "id": "Split Batch",
+      "name": "Split In Batches",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 1,
+      "position": [1000, 300],
+      "parameters": {
+        "batchSize": 5
+      }
+    },
+    {
+      "id": "Send WhatsApp",
+      "name": "Send WhatsApp Message",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [1200, 300],
+      "parameters": {
+        "method": "POST",
+        "url": "https://graph.facebook.com/v19.0/YOUR_PHONE_NUMBER_ID/messages",
+        "authentication": "headerAuth",
+        "jsonParameters": true,
+        "options": {},
+        "bodyParametersJson": "{\n  \"messaging_product\": \"whatsapp\",\n  \"to\": \"{{$json.phone}}\",\n  \"type\": \"text\",\n  \"text\": {\n    \"body\": \"Hello, this is an official update from us.\"\n  }\n}"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "WHATSAPP_TOKEN_ID",
+          "name": "WhatsApp Cloud API Token"
+        }
+      }
+    },
+    {
+      "id": "Update Sheet",
+      "name": "Update Google Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [1400, 300],
+      "parameters": {
+        "operation": "update",
+        "sheetId": "YOUR_GOOGLE_SHEET_ID",
+        "range": "Sheet1!A:D",
+        "key": "phone",
+        "valueRenderMode": "UNFORMATTED_VALUE",
+        "data": [
+          {
+            "range": "status",
+            "value": "sent"
+          }
+        ]
+      },
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "GOOGLE_CREDS_ID",
+          "name": "Google Sheets Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Telegram Trigger": {
+      "main": [["Extract Tag"]]
+    },
+    "Extract Tag": {
+      "main": [["Read Sheet"]]
+    },
+    "Read Sheet": {
+      "main": [["Filter Contacts"]]
+    },
+    "Filter Contacts": {
+      "main": [["Split Batch"]]
+    },
+    "Split Batch": {
+      "main": [["Send WhatsApp"]]
+    },
+    "Send WhatsApp": {
+      "main": [["Update Sheet"]]
+    }
+  }
+}
