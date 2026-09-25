@@ -67,6 +67,9 @@ def handle_message(db: Session, msg: dict, profile_name: str = "") -> Contact | 
     else:
         db.add(ContactEvent(contact_id=contact.id, kind="inbound", title="WhatsApp message", detail=text[:2000]))
 
+    if word in STOP_WORDS:
+        return contact  # an opt-out is not engagement; don't count it as a campaign reply
+
     # Credit the reply to the latest campaign this person received in the last 7 days
     rec = db.scalar(
         select(CampaignRecipient)

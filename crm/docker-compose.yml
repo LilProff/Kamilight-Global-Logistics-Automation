@@ -1,0 +1,24 @@
+# On the Hetzner server, next to the existing n8n:
+#   cp backend/.env.example .env   (fill it in; set DATABASE_URL to Supabase, or keep SQLite on the volume)
+#   docker compose up -d --build
+# Then point a subdomain (e.g. crm.kamilightglobal.com) at port 8000 through the existing reverse proxy.
+services:
+  crm:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Default to SQLite on a persistent volume if .env doesn't set Supabase
+      DATABASE_URL: ${DATABASE_URL:-sqlite:////data/kgl.db}
+    volumes:
+      - crm-data:/data
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  crm-data:

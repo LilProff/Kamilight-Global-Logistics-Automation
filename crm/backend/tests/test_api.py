@@ -115,11 +115,19 @@ def test_webhook_receipts_replies_and_stop(client):
     report = client.get(f"/api/campaigns/{camp['id']}").json()["report"]
     assert report["read"] == 1 and report["delivered"] == 1 and report["replied"] == 1
 
+    b = _contact(client, name="Bola", phone="08032222222", wa_opt_in=True)
+    camp2 = client.post("/api/campaigns", json={"name": "Promo 2", "body": "Hi", "filters": {"search": "Bola"}}).json()
+    client.post(f"/api/campaigns/{camp2['id']}/send", json={})
+    _drain()
+    client.post("/api/webhooks/whatsapp", json=_wa({"messages": [{"from": "2348032222222", "type": "text", "text": {"body": " STOP "}}]}))
+    assert client.get(f"/api/campaigns/{camp2['id']}").json()["report"]["replied"] == 0  # opt-out isn't a reply
+    assert client.get(f"/api/contacts/{b['id']}").json()["wa_opted_out"]
+
     client.post("/api/webhooks/whatsapp", json=_wa({"messages": [{"from": "2348031111111", "type": "text", "text": {"body": " STOP "}}]}))
     contact = client.get(f"/api/contacts/{a['id']}").json()
     assert contact["wa_opted_out"] and not contact["wa_opt_in"]
     p = client.post("/api/campaigns/preview", json={"filters": {}, "category": "utility"}).json()
-    assert p["will_receive"] == 0 and p["excluded"]["opted_out"] == 1
+    assert p["will_receive"] == 0 and p["excluded"]["opted_out"] == 2
 
     # A brand-new number writing in becomes a new enquiry
     client.post("/api/webhooks/whatsapp", json=_wa({
