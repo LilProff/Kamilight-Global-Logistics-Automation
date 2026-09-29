@@ -1,5 +1,6 @@
-# Render Blueprint: New > Blueprint > pick this repo. Creates KGL's app and its own database.
-# Values marked sync: false are typed into the Render dashboard, never committed.
+# Render Blueprint: New > Blueprint > pick this repo. Creates KGL's always-on app.
+# The database lives on Supabase (free plan). Values marked sync: false are typed into the
+# Render dashboard, never committed.
 services:
   - type: web
     name: kgl-crm
@@ -11,18 +12,15 @@ services:
     numInstances: 1          # the campaign sender runs in-process: keep ONE instance
     healthCheckPath: /health
     envVars:
+      # Supabase > Project Settings > Database > Connection string > Session pooler
       - key: DATABASE_URL
-        fromDatabase:
-          name: kgl-db
-          property: connectionString
+        sync: false
       - key: JWT_SECRET
         generateValue: true
       - key: ADMIN_EMAIL
         sync: false
       - key: ADMIN_PASSWORD
         sync: false
-      - key: CORS_ORIGINS
-        value: https://crm.kamilightglobal.com
       - key: WA_TOKEN
         sync: false
       - key: WA_PHONE_NUMBER_ID
@@ -31,9 +29,3 @@ services:
         sync: false
       - key: WA_VERIFY_TOKEN
         generateValue: true
-
-databases:
-  - name: kgl-db
-    databaseName: kgl
-    plan: basic-256mb
-    region: frankfurt

@@ -14,6 +14,11 @@ def _drain():
             pass
 
 
+def test_health_endpoints(client):
+    assert client.get("/health").json() == {"ok": True}
+    assert client.get("/health/db").json() == {"ok": True}
+
+
 def test_requires_login():
     from fastapi.testclient import TestClient
 

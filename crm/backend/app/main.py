@@ -2,8 +2,9 @@ import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -40,6 +41,18 @@ for r in (contacts.router, segments.router, campaigns.router, misc.router):
 
 @app.get("/health")
 def health():
+    """Is the app up? Kept independent of the database so Render doesn't restart-loop if the DB is down."""
+    return {"ok": True}
+
+
+@app.get("/health/db")
+def health_db():
+    """Point an uptime monitor here: fails (503) when the database can't be reached."""
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("select 1"))
+    except Exception:
+        raise HTTPException(503, "Database unreachable") from None
     return {"ok": True}
 
 

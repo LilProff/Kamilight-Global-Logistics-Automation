@@ -18,6 +18,10 @@ def make_engine(url: str):
     kwargs = {"pool_pre_ping": True}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}
+    else:
+        # Keep connections few (Supabase's free pooler allows a limited number) and refresh them
+        # before idle timeouts drop them
+        kwargs |= {"pool_size": 5, "max_overflow": 3, "pool_recycle": 1800}
     return create_engine(url, **kwargs)
 
 

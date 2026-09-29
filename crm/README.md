@@ -31,15 +31,16 @@ npm run dev                     # http://localhost:5173
 
 Remove demo data with `python -m scripts.seed_demo --remove`. Run the tests with `.venv\Scripts\python -m pytest`.
 
-## Deploy (Hetzner, next to n8n)
+## Deploy (Render + Supabase)
 
-```bash
-cd crm
-cp backend/.env.example .env    # fill in; use the Supabase connection string for DATABASE_URL
-docker compose up -d --build
-```
+1. **Supabase:** create a project (free plan is fine; the app queries the database constantly, so it never counts as inactive and won't be paused). Copy the **Session pooler** connection string (Project Settings > Database).
+2. **Render:** New > Blueprint > this repo, branch `phase1-crm`. It reads `render.yaml` and creates the always-on `kgl-crm` service (Starter plan, one instance: the campaign sender runs inside it, so never scale it past one).
+3. Enter the secrets Render asks for: `DATABASE_URL` (the Supabase string), `ADMIN_EMAIL`, `ADMIN_PASSWORD`. Leave the `WA_*` values blank until WhatsApp is connected.
+4. Tables are created automatically on first start. Monitor `https://<service>/health/db`.
 
-Put `https://crm.<domain>` in front of port 8000 with the server's existing reverse proxy.
+Free Supabase has no automatic backups: export the database from the Supabase dashboard from time to time.
+
+Alternative: `docker compose up -d --build` in `crm/` runs the same image on any server (SQLite by default, or set `DATABASE_URL`).
 
 ## Connect WhatsApp (when KGL's Meta access arrives)
 
