@@ -16,4 +16,5 @@ COPY backend/scripts ./scripts
 COPY --from=web /web/dist ./static
 RUN mkdir -p /data
 EXPOSE 8000
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]
+# Render sets PORT; elsewhere it defaults to 8000
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]

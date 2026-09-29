@@ -11,6 +11,10 @@ class Base(DeclarativeBase):
 
 
 def make_engine(url: str):
+    # Render and Supabase hand out postgres:// URLs; SQLAlchemy needs the psycopg driver named
+    for prefix in ("postgres://", "postgresql://"):
+        if url.startswith(prefix):
+            url = "postgresql+psycopg://" + url[len(prefix):]
     kwargs = {"pool_pre_ping": True}
     if url.startswith("sqlite"):
         kwargs["connect_args"] = {"check_same_thread": False}

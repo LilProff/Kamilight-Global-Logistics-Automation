@@ -3,7 +3,8 @@ import tempfile
 
 # Must be set before the app (and its engine) is imported
 _tmp = tempfile.mkdtemp()
-os.environ["DATABASE_URL"] = f"sqlite:///{_tmp}/test.db"
+# Set TEST_DATABASE_URL to run the suite against Postgres (the production database type)
+os.environ["DATABASE_URL"] = os.environ.get("TEST_DATABASE_URL") or f"sqlite:///{_tmp}/test.db"
 os.environ["RUN_WORKER"] = "false"
 os.environ["WA_TOKEN"] = ""
 os.environ["SMTP_HOST"] = ""
