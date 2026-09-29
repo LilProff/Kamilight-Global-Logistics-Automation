@@ -18,7 +18,7 @@ from app.models import CUSTOMER_TYPES, Contact, ContactEvent, utcnow
 from app.phone import normalize_phone
 
 HEADER_ALIASES = {
-    "name": ["name", "full name", "customer name", "client name", "customer", "client", "contact name"],
+    "name": ["name", "full name", "customer name", "name of customer", "client name", "name of client", "customer", "client", "contact name"],
     "phone": ["phone", "phone number", "whatsapp", "whatsapp number", "mobile", "mobile number", "tel", "telephone", "number", "phone no"],
     "email": ["email", "email address", "e-mail"],
     "company": ["company", "business", "business name", "company name", "organisation", "organization"],
@@ -26,7 +26,7 @@ HEADER_ALIASES = {
     "tag": ["tag", "tags", "category", "segment", "group", "type"],
     "stage": ["stage"],
     "source": ["source", "lead source"],
-    "notes": ["notes", "note", "remarks", "comment", "comments"],
+    "notes": ["notes", "note", "remark", "remarks", "comment", "comments"],
     "route": ["route", "routes", "lane", "service"],
     "assigned_to": ["assigned to", "account manager", "staff", "rep"],
     "opt_out": ["whatsapp opt-out", "opt out", "opt-out", "unsubscribed"],
@@ -44,6 +44,13 @@ OLD_TAG_STATUS = {
     "cold": "new",
 }
 OLD_STAGE_STATUS = {"lead": "new", "prospect": "quoted", "active": "booked", "past": "dormant", "churned": "lost"}
+# Free-text remarks such as "existing customer" or "past customer" (matched by keyword)
+REMARK_KEYWORDS = [("major", "vip"), ("existing", "booked"), ("active", "booked"), ("past", "dormant"), ("potential", "new")]
+
+
+def status_from_remark(text: str) -> str | None:
+    text = text.lower()
+    return next((status for word, status in REMARK_KEYWORDS if word in text), None)
 
 
 @dataclass
@@ -127,7 +134,21 @@ def import_contacts(
             continue
         key = phone or email
         if key in seen_in_file:
+            # Same person twice in one file: keep one profile, but don't lose the better status or extra notes
             report.skipped += 1
+            twin = (db.scalar(select(Contact).where(Contact.phone == phone)) if phone
+                    else db.scalar(select(Contact).where(Contact.email == email)))
+            if twin is not None:
+                dup_status = (
+                    OLD_TAG_STATUS.get(get("tag").lower()) or OLD_STAGE_STATUS.get(get("stage").lower())
+                    or status_from_remark(get("notes")) or "new"
+                )
+                if twin.status == "new" and dup_status != "new":
+                    twin.status = dup_status
+                if get("notes") and get("notes") not in twin.notes:
+                    twin.notes = (twin.notes + "\n" + get("notes")).strip()
+                if not twin.name and get("name"):
+                    twin.name = get("name")
             continue
         seen_in_file.add(key)
 
@@ -139,7 +160,9 @@ def import_contacts(
 
         tag_value = get("tag").lower()
         stage_value = get("stage").lower()
-        status = OLD_TAG_STATUS.get(tag_value) or OLD_STAGE_STATUS.get(stage_value) or "new"
+        status = (
+            OLD_TAG_STATUS.get(tag_value) or OLD_STAGE_STATUS.get(stage_value) or status_from_remark(get("notes")) or "new"
+        )
         tags = [t for t in [tag_value, extra_tag] if t and t not in OLD_TAG_STATUS and t != "do not contact"]
         dnc = tag_value == "do not contact"
         opted_out = _truthy(get("opt_out"))

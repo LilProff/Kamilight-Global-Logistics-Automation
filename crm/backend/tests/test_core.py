@@ -72,6 +72,32 @@ def test_import_maps_columns_tags_and_dedupes(db):
     assert db.scalar(select(Contact).where(Contact.phone == "+2348031111111")).name == "Ada Obi"
 
 
+def test_import_kgl_sheet_layout_reads_name_and_status_from_remark(db):
+    csv = (
+        b"S/N,NAME OF CUSTOMER,PHONE NUMBER ,EMAIL,REMARK\n"
+        b"1,Ada Obi,08031111111,,existing customer\n"
+        b"2,Bayo,08032222222,,past customer\n"
+        b"3,Chi,08033333333,,potential c\n"
+        b"4,Dele,08034444444,,\n"
+    )
+    assert import_contacts(db, "kgl.csv", csv).created == 4
+    by_name = {c.name: c for c in db.scalars(select(Contact))}
+    assert {n: c.status for n, c in by_name.items()} == {"Ada Obi": "booked", "Bayo": "dormant", "Chi": "new", "Dele": "new"}
+    assert by_name["Ada Obi"].notes == "existing customer"
+
+
+def test_import_duplicate_rows_keep_the_better_status(db):
+    csv = (
+        b"NAME OF CUSTOMER,PHONE NUMBER,REMARK\n"
+        b"Ada,08031111111,potential c\n"
+        b"Ada O.,+234 803 111 1111,existing customer\n"
+    )
+    report = import_contacts(db, "kgl.csv", csv)
+    assert (report.created, report.skipped) == (1, 1)
+    ada = db.scalar(select(Contact))
+    assert ada.status == "booked" and "existing customer" in ada.notes and "potential c" in ada.notes
+
+
 def test_import_csv_without_phone_or_email_column(db):
     report = import_contacts(db, "x.csv", b"Name,City\nA,Lagos\n")
     assert report.created == 0 and "No phone or email column" in report.problems[0]
