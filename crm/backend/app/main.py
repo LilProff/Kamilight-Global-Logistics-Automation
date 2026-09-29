@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import get_settings
-from app.db import Base, engine
+from app.db import Base, engine, harden_postgres
 from app.routers import campaigns, contacts, misc, segments
 from app.worker import Worker
 
@@ -20,6 +20,7 @@ STATIC = Path(__file__).resolve().parent.parent / "static"  # built frontend, co
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(engine)
+    harden_postgres(engine)
     worker = Worker() if get_settings().run_worker else None
     if worker:
         worker.start()

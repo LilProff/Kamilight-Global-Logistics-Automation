@@ -1,6 +1,6 @@
 from collections.abc import Iterator
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.config import get_settings
@@ -23,6 +23,24 @@ def make_engine(url: str):
         # before idle timeouts drop them
         kwargs |= {"pool_size": 5, "max_overflow": 3, "pool_recycle": 1800}
     return create_engine(url, **kwargs)
+
+
+def harden_postgres(eng) -> None:
+    """Supabase publishes public-schema tables through a web API that the (public) publishable key can call.
+    Customer data must only be reachable through this app, so switch on Row Level Security and take away the
+    API roles' rights on every table. The app connects as the table owner, which RLS doesn't apply to."""
+    if eng.dialect.name != "postgresql":
+        return
+    with eng.begin() as conn:
+        tables = [r[0] for r in conn.execute(text("select tablename from pg_tables where schemaname = 'public'"))]
+        roles = [r[0] for r in conn.execute(text("select rolname from pg_roles where rolname in ('anon', 'authenticated')"))]
+        for table in tables:
+            conn.execute(text(f'alter table public."{table}" enable row level security'))
+            for role in roles:
+                conn.execute(text(f'revoke all on public."{table}" from {role}'))
+        for role in roles:
+            conn.execute(text(f"alter default privileges in schema public revoke all on tables from {role}"))
+            conn.execute(text(f"alter default privileges in schema public revoke all on sequences from {role}"))
 
 
 engine = make_engine(get_settings().database_url)

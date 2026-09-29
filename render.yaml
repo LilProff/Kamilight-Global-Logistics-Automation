@@ -5,8 +5,8 @@ services:
   - type: web
     name: kgl-crm
     runtime: docker
-    rootDir: crm
-    dockerfilePath: ./Dockerfile
+    dockerfilePath: ./crm/Dockerfile
+    dockerContext: ./crm
     plan: starter            # always on; free instances sleep and would stall campaigns
     region: frankfurt        # closest Render region to Lagos
     numInstances: 1          # the campaign sender runs in-process: keep ONE instance

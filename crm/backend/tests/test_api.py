@@ -19,6 +19,22 @@ def test_health_endpoints(client):
     assert client.get("/health/db").json() == {"ok": True}
 
 
+def test_postgres_tables_are_locked_down_from_the_public_api():
+    import pytest
+    from sqlalchemy import text
+
+    from app.db import engine, harden_postgres
+
+    if engine.dialect.name != "postgresql":
+        pytest.skip("Postgres only (run with TEST_DATABASE_URL)")
+    harden_postgres(engine)
+    with engine.connect() as conn:
+        rls = dict(conn.execute(text(
+            "select relname, relrowsecurity from pg_class c join pg_namespace n on n.oid = c.relnamespace "
+            "where n.nspname = 'public' and relkind = 'r'")).all())
+    assert rls and all(rls.values()), rls
+
+
 def test_requires_login():
     from fastapi.testclient import TestClient
 
