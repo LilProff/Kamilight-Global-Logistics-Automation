@@ -19,6 +19,9 @@ Render builds from branch `phase1-crm` (auto-deploy on push). Health check: `/he
 4. Submit marketing templates; enter each approved name in the campaign builder.
 5. First campaign to a small segment; check delivered/read counts and the fee estimate.
 
+## Keep-awake job (free Render)
+A Supabase `pg_cron` job named `kgl-keepalive` calls `https://kgl-crm.onrender.com/healthz` every 5 minutes (`select net.http_get(...)`), so the free instance never idles for 15 minutes. Check it: `select * from cron.job_run_details order by start_time desc limit 5;` and `select status_code from net._http_response order by created desc limit 5;`. Stop it: `select cron.unschedule('kgl-keepalive');`. If the service URL changes, re-schedule with the new URL. Not needed on the Starter plan.
+
 ## Backups (free Supabase)
 Supabase dashboard → Database → Backups is unavailable on free; export with `pg_dump "<direct or pooler URL>" --no-owner -Fc -f kgl-YYYYMMDD.dump` (client major version must match the server: 17) or the dashboard's table export, and store off the laptop. Test a restore into a scratch project.
 

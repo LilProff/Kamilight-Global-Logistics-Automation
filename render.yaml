@@ -7,7 +7,9 @@ services:
     runtime: docker
     dockerfilePath: ./crm/Dockerfile
     dockerContext: ./crm
-    plan: starter            # always on; free instances sleep and would stall campaigns
+    plan: free               # $0. Free instances sleep after 15 min idle; a pg_cron job in Supabase pings
+                             # /healthz every 5 min to keep it awake (see crm/docs/RUNBOOK.md).
+                             # Upgrade trigger: change to `starter` ($7) for a guaranteed always-on instance
     region: frankfurt        # closest Render region to Lagos
     numInstances: 1          # the campaign sender runs in-process: keep ONE instance
     healthCheckPath: /health

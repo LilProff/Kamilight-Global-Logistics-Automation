@@ -3,7 +3,7 @@
 Context: **B, client system** (see the architecture rules): go-live is paid, always-on infrastructure; no free tier that pauses, sleeps or lacks backups for live customer data.
 
 ```
- Staff browser ──HTTPS──▶  Render web service "kgl-crm"  (Docker, Starter, 1 instance, always on)
+ Staff browser ──HTTPS──▶  Render web service "kgl-crm"  (Docker, Free plan + 5-min keep-awake ping from Supabase pg_cron; Starter $7 = guaranteed always on)
  (React dashboard,          ├─ FastAPI  /api/*            REST for the dashboard (JWT login)
   served by FastAPI)        ├─ /api/webhooks/whatsapp     Meta webhook: signature-checked, duplicate-proof
                             ├─ background worker thread   starts scheduled campaigns, sends at 10 msg/s,
