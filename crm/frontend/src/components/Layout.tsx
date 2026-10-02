@@ -35,7 +35,9 @@ export default function Layout() {
         <div className="spacer" />
         <div className="who">
           {me?.name || me?.email}
-          {me && <span className="role">{me.role === "admin" ? "Administrator" : "Staff"}</span>}
+          {me && me.name.toLowerCase() !== (me.role === "admin" ? "administrator" : "staff") && (
+            <span className="role">{me.role === "admin" ? "Administrator" : "Staff"}</span>
+          )}
         </div>
         <button className="ghost" style={{ color: "#c9d2d9" }} onClick={signOut}>
           Sign out

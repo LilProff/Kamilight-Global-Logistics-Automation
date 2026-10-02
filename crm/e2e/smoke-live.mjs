@@ -44,10 +44,12 @@ await step("correct password opens the dashboard (test-mode banner shown until W
   await page.getByRole("heading", { name: "Dashboard" }).waitFor();
   await page.screenshot({ path: path.join(shots, "dashboard.png") });
 });
-for (const [link, heading] of [["Customers", "Customers"], ["Segments", "Segments"], ["Campaigns", "Campaigns"]]) {
+for (const [link, heading] of [["Customers", "Customers"], ["Segments", "Segments"], ["Campaigns", "Campaigns"], ["Automations", "Automations"], ["Team", "Team"]]) {
   await step(`${link} screen loads`, async () => {
     await page.getByRole("link", { name: link, exact: true }).first().click();
     await page.getByRole("heading", { name: heading, exact: true }).waitFor();
+    await page.waitForLoadState("networkidle");
+    await page.screenshot({ path: path.join(shots, `${link.toLowerCase()}.png`) });
   });
 }
 await step("campaign builder opens with a live audience number", async () => {

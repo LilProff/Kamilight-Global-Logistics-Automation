@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/contacts", tags=["contacts"], dependencies=[Depe
 DEFAULT_ROUTES = ["china-air", "china-sea", "uk-import", "us-import", "lagos-uk", "lagos-us", "lagos-canada", "clearing", "haulage"]
 SORTS = {
     "recent": Contact.updated_at.desc(),
-    "name": Contact.name.asc(),
+    "name": func.lower(Contact.name).asc(),  # case-insensitive, so "mr udo" and "MR UDO" sort together
     "spend": Contact.total_spend_ngn.desc(),
     "last_shipment": Contact.last_shipment_at.desc(),
     "created": Contact.created_at.desc(),

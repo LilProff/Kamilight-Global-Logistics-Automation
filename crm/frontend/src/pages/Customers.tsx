@@ -22,7 +22,7 @@ export default function Customers() {
   const [filters, setFilters] = useState<Filters>(() => parseFilters(params.get("f")));
   const [search, setSearch] = useState(filters.search ?? "");
   const [page, setPage] = useState(1);
-  const [sort, setSort] = useState("recent");
+  const [sort, setSort] = useState("name");
   const [data, setData] = useState<Page | null>(null);
   const [error, setError] = useState("");
   const [showFilters, setShowFilters] = useState(Object.keys(filters).length > 0);
@@ -86,8 +86,8 @@ export default function Customers() {
           </button>
           {filterCount > 0 && <button className="ghost" onClick={() => setFilters({})}>Clear</button>}
           <select id="sort" style={{ width: "auto" }} value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort">
+            <option value="name">Name A–Z</option>
             <option value="recent">Recently updated</option>
-            <option value="name">Name</option>
             <option value="spend">Highest spend</option>
             <option value="last_shipment">Last shipment</option>
             <option value="created">Newest</option>
