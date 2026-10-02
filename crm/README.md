@@ -8,6 +8,9 @@ The customer database and broadcast centre KGL asked for.
 - **Filters and segments:** filter by status, route, customer type, days since last shipment, number of shipments, spend, city, tags, source, staff. Save any filter as a segment.
 - **Broadcast and campaign centre:** pick a segment or filters, see who will receive the message and the Meta fee before sending, write a personalised message (`{first_name}`, `{city}`…) with an image, video or PDF, then send now or schedule. Messages go out at a steady pace and delivery, read and reply counts are reported per campaign.
 - **Compliance built in:** WhatsApp marketing only goes to customers who agreed to it; "STOP" replies opt people out instantly; do-not-contact is never messaged. Marketing uses Meta-approved templates.
+- **Automatic campaigns:** win-back (dormant customers), quote follow-up and welcome, each off until switched on, capped per day, daytime only, never repeating within a cool-down.
+- **Staff accounts and security:** individual logins with roles (administrator / staff), hashed passwords, change-password, sign-in lockout, strict security headers, and Supabase's public data API locked down.
+- **Nothing is dropped on import:** customers with a missing or wrong number are kept, tagged `fix-phone`, with the original text in their notes.
 - **WhatsApp webhook:** delivery and read receipts, inbound replies on the customer timeline, and new numbers that message KGL become new enquiries automatically.
 
 **Test mode:** until KGL's WhatsApp Business credentials are added, everything runs end to end but nothing is actually sent. The dashboard shows a banner.

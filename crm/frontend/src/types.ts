@@ -132,6 +132,54 @@ export interface Campaign {
   audience?: Preview | null;
 }
 
+export interface Me {
+  id: number;
+  email: string;
+  name: string;
+  role: "admin" | "staff";
+}
+
+export interface TeamUser {
+  id: number;
+  email: string;
+  name: string;
+  role: "admin" | "staff";
+  active: boolean;
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export interface AutomationPreview {
+  qualifies_now: number;
+  sent_today: number;
+  daily_limit: number;
+  next_batch: number;
+  fee_per_message_ngn: number;
+  estimated_cost_ngn: number;
+  blocked_reason: string | null;
+  test_mode: boolean;
+}
+
+export interface AutomationView {
+  key: "winback" | "quote_followup" | "welcome";
+  title: string;
+  summary: string;
+  category: "marketing" | "utility";
+  uses_days: boolean;
+  enabled: boolean;
+  body: string;
+  wa_template_name: string;
+  wa_template_lang: string;
+  wa_template_params: string[];
+  days: number;
+  cooldown_days: number;
+  daily_limit: number;
+  sent_total: number;
+  last_sent_at: string | null;
+  in_sending_hours: boolean;
+  preview: AutomationPreview;
+}
+
 export interface Stats {
   total: number;
   by_status: Partial<Record<Status, number>>;

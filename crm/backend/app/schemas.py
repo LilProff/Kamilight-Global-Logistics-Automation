@@ -1,7 +1,8 @@
+import re
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.lists import unpack
 
@@ -31,12 +32,34 @@ class ContactBase(BaseModel):
     next_follow_up: datetime | None = None
 
 
+LIMITS = {"name": 200, "phone": 40, "email": 200, "company": 200, "city": 120, "goods": 300, "assigned_to": 120,
+          "notes": 5000, "lost_reason": 300, "birthday": 5, "source": 30, "preferred_mode": 10}
+
+
+def _check_lengths(values: dict) -> dict:
+    for field, limit in LIMITS.items():
+        v = values.get(field)
+        if isinstance(v, str) and len(v) > limit:
+            raise ValueError(f"{field.replace('_', ' ').capitalize()} is too long (the limit is {limit} characters).")
+    return values
+
+
 class ContactCreate(ContactBase):
     status: Status = "new"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _limits(cls, values):
+        return _check_lengths(values) if isinstance(values, dict) else values
 
 
 class ContactUpdate(BaseModel):
     """Every field optional: only what's sent changes."""
+
+    @model_validator(mode="before")
+    @classmethod
+    def _limits(cls, values):
+        return _check_lengths(values) if isinstance(values, dict) else values
 
     name: str | None = None
     phone: str | None = None
@@ -120,6 +143,7 @@ class ImportResult(BaseModel):
     created: int
     updated: int
     skipped: int
+    needs_fix: int = 0
     problems: list[str]
 
 
@@ -150,13 +174,30 @@ class CampaignIn(BaseModel):
     category: Category = "marketing"
     filters: dict = {}
     segment_id: int | None = None
-    subject: str = ""
-    body: str = ""
-    media_url: str = ""
+    subject: str = Field(default="", max_length=200)
+    body: str = Field(default="", max_length=4000)
+    media_url: str = Field(default="", max_length=500)
     media_type: Literal["", "image", "video", "document"] = ""
-    wa_template_name: str = ""
-    wa_template_lang: str = "en"
+    wa_template_name: str = Field(default="", max_length=120, pattern=r"^[a-z0-9_]*$")
+    wa_template_lang: str = Field(default="en", max_length=10)
     wa_template_params: list[str] = []
+
+    @field_validator("media_url")
+    @classmethod
+    def _web_address_only(cls, v: str) -> str:
+        v = v.strip()
+        if v and not re.match(r"^https?://[^\s]+$", v, re.I):
+            raise ValueError("The attachment link must be a web address starting with http:// or https://")
+        return v
+
+    @field_validator("wa_template_params")
+    @classmethod
+    def _known_placeholders(cls, v: list[str]) -> list[str]:
+        allowed = {"first_name", "name", "city", "company", "last_route"}
+        bad = [p for p in v if p not in allowed]
+        if bad:
+            raise ValueError(f"Unknown template variable(s): {', '.join(bad)}. Use: {', '.join(sorted(allowed))}.")
+        return v
 
 
 class CampaignOut(CampaignIn):
@@ -175,6 +216,3 @@ class ScheduleIn(BaseModel):
     send_at: datetime | None = None  # None = send now
 
 
-class LoginIn(BaseModel):
-    email: str
-    password: str

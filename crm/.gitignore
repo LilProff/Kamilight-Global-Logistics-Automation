@@ -8,3 +8,4 @@ backend/static/
 frontend/node_modules/
 frontend/dist/
 e2e/node_modules/
+*.tsbuildinfo

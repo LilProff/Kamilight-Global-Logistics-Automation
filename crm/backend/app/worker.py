@@ -1,9 +1,11 @@
-"""Background loop: starts scheduled campaigns, sends queued messages at a safe pace, sweeps dormant customers daily."""
+"""Background loop: starts scheduled campaigns, sends queued messages at a safe pace, runs the automatic
+campaigns, and marks customers dormant daily."""
 
 import logging
 import threading
 import time
 
+from app.automations import run_automations
 from app.campaigns import process_batch, start_due
 from app.config import get_settings
 from app.db import SessionLocal
@@ -18,6 +20,7 @@ class Worker:
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._run, name="kgl-worker", daemon=True)
         self._last_sweep_day: str | None = None
+        self._last_automation_run = 0.0
 
     def start(self) -> None:
         self._thread.start()
@@ -27,16 +30,22 @@ class Worker:
         self._thread.join(timeout=10)
 
     def tick(self) -> None:
-        batch = max(1, int(get_settings().send_rate_per_second * TICK_SECONDS))
+        settings = get_settings()
+        batch = max(1, int(settings.send_rate_per_second * TICK_SECONDS))
         with SessionLocal() as db:
             start_due(db)
-            process_batch(db, limit=batch)
             today = time.strftime("%Y-%m-%d")
             if self._last_sweep_day != today:
                 changed = sweep_dormant(db)
                 self._last_sweep_day = today
                 if changed:
                     log.info("Marked %s customers dormant", changed)
+            if time.monotonic() - self._last_automation_run >= settings.automation_interval_seconds:
+                self._last_automation_run = time.monotonic()
+                queued = run_automations(db)
+                if queued:
+                    log.info("Automations queued %s messages", queued)
+            process_batch(db, limit=batch)
 
     def _run(self) -> None:
         while not self._stop.is_set():

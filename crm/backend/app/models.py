@@ -17,6 +17,62 @@ CUSTOMER_TYPES = ["individual", "online_seller", "business", "diaspora", "partne
 SOURCES = ["old_list", "whatsapp", "ad", "referral", "partner", "walk_in", "website", "apollo", "manual"]
 
 
+class User(Base):
+    """A staff login. Passwords are stored only as salted scrypt hashes."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), default="")
+    password_hash: Mapped[str] = mapped_column(String(300))
+    role: Mapped[str] = mapped_column(String(20), default="staff")  # admin / staff
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    token_version: Mapped[int] = mapped_column(Integer, default=0)  # bumping it signs the user out everywhere
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+
+class LoginAttempt(Base):
+    """Failed sign-ins, kept briefly to lock out password guessing."""
+
+    __tablename__ = "login_attempts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(200), index=True)
+    ip: Mapped[str] = mapped_column(String(64), default="", index=True)
+    at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class Automation(Base):
+    """A rule that sends a message by itself (win-back, quote follow-up, welcome). Off until staff switch it on."""
+
+    __tablename__ = "automations"
+
+    key: Mapped[str] = mapped_column(String(40), primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    body: Mapped[str] = mapped_column(Text, default="")
+    wa_template_name: Mapped[str] = mapped_column(String(120), default="")
+    wa_template_lang: Mapped[str] = mapped_column(String(10), default="en")
+    wa_template_params: Mapped[list] = mapped_column(JSON, default=list)
+    days: Mapped[int] = mapped_column(Integer, default=2)  # quote follow-up: days after the quote
+    cooldown_days: Mapped[int] = mapped_column(Integer, default=60)  # don't message the same person again within
+    daily_limit: Mapped[int] = mapped_column(Integer, default=30)  # protects the WhatsApp number's rating
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
+class AutomationLog(Base):
+    """Who each automation has messaged, so nobody is messaged twice."""
+
+    __tablename__ = "automation_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    automation_key: Mapped[str] = mapped_column(String(40), index=True)
+    contact_id: Mapped[int] = mapped_column(ForeignKey("contacts.id", ondelete="CASCADE"), index=True)
+    campaign_id: Mapped[int | None] = mapped_column(Integer)
+    at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
 class Contact(Base):
     __tablename__ = "contacts"
 
@@ -59,7 +115,7 @@ class Contact(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
     events: Mapped[list["ContactEvent"]] = relationship(
-        back_populates="contact", cascade="all, delete-orphan", order_by="desc(ContactEvent.created_at)"
+        back_populates="contact", cascade="all, delete-orphan", order_by="(desc(ContactEvent.created_at), desc(ContactEvent.id))"
     )
 
     @property

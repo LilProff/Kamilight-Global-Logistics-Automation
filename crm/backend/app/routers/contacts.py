@@ -32,6 +32,15 @@ SORTS = {
 }
 
 
+def _safe_cell(column: str, value):
+    """Stop spreadsheet formula injection: a customer named =HYPERLINK(...) must not run when staff open the CSV in Excel."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        if column == "phone" and value[1:].isdigit():
+            return value  # a real number like +2348012345678
+        return "'" + value
+    return value
+
+
 class SearchIn(BaseModel):
     filters: dict = {}
     page: int = 1
@@ -77,7 +86,7 @@ def export(body: SearchIn, db: Session = Depends(get_db)):
     w = csv.writer(buf)
     w.writerow(cols)
     for c in db.scalars(contacts_query(body.filters).order_by(Contact.id)):
-        w.writerow([", ".join(unpack(getattr(c, k))) if k in ("routes", "tags") else getattr(c, k) for k in cols])
+        w.writerow([_safe_cell(k, ", ".join(unpack(getattr(c, k))) if k in ("routes", "tags") else getattr(c, k)) for k in cols])
     return StreamingResponse(
         iter([buf.getvalue()]), media_type="text/csv",
         headers={"Content-Disposition": 'attachment; filename="kgl-customers.csv"'},

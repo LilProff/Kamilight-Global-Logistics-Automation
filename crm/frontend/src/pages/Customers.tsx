@@ -124,7 +124,9 @@ export default function Customers() {
                   <Link to={`/customers/${c.id}`} onClick={(e) => e.stopPropagation()}><b>{c.name || "Unnamed"}</b></Link>
                   {c.company && <div className="muted" style={{ fontSize: 12 }}>{c.company}</div>}
                 </td>
-                <td className="mono">{c.phone ?? <span className="muted">{c.email}</span>}</td>
+                <td className="mono">
+                  {c.phone ?? (c.email ? <span className="muted">{c.email}</span> : <span className="pill st-quoted">Needs a number</span>)}
+                </td>
                 <td><StatusPill status={c.status} /></td>
                 <td>{TYPE_LABEL[c.customer_type]}</td>
                 <td>{c.routes.map((r) => <span key={r} className="chip">{routeLabel(r)}</span>)}</td>
@@ -203,7 +205,7 @@ function AddCustomer({ onClose, onSaved }: { onClose: () => void; onSaved: (id: 
   );
 }
 
-interface ImportResult { rows: number; created: number; updated: number; skipped: number; problems: string[] }
+interface ImportResult { rows: number; created: number; updated: number; skipped: number; needs_fix: number; problems: string[] }
 
 function ImportDialog({ onClose }: { onClose: () => void }) {
   const [file, setFile] = useState<File | null>(null);
@@ -238,7 +240,14 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
       {result ? (
         <div className="stack">
           <p className="ok"><b>{result.created}</b> new customers added, <b>{result.updated}</b> existing ones updated.</p>
-          {result.skipped > 0 && <p><b>{result.skipped}</b> rows skipped (duplicates or no usable phone/email).</p>}
+          {result.skipped > 0 && <p><b>{result.skipped}</b> repeated rows were folded into the first one (nothing lost).</p>}
+          {result.needs_fix > 0 && (
+            <p>
+              <b>{result.needs_fix}</b> customers were kept but have no usable WhatsApp number. They're tagged <span className="chip">fix-phone</span> with the number as it
+              appeared in the sheet saved in their notes, so you can correct them.{" "}
+              <a href={`/customers?f=${encodeURIComponent(JSON.stringify({ tags_any: ["fix-phone"] }))}`}>Show them</a>
+            </p>
+          )}
           {result.problems.length > 0 && (
             <details><summary>Show problems ({result.problems.length})</summary><ul>{result.problems.map((p) => <li key={p}>{p}</li>)}</ul></details>
           )}

@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, setToken } from "../api";
+import Logo from "../components/Logo";
 
 export default function Login() {
   const nav = useNavigate();
@@ -19,6 +20,7 @@ export default function Login() {
       nav("/");
     } catch (err) {
       setError((err as Error).message);
+      setPassword("");
     } finally {
       setBusy(false);
     }
@@ -27,10 +29,11 @@ export default function Login() {
   return (
     <div className="login">
       <form onSubmit={submit}>
-        <div className="brand">
-          KGL <span style={{ color: "var(--accent)" }}>·</span> Customers
+        <Logo height={40} />
+        <div>
+          <h1 style={{ fontSize: 22 }}>Customer management</h1>
+          <p className="muted">Staff sign-in</p>
         </div>
-        <p className="muted">Kamilight Global Logistics staff sign-in</p>
         <label className="field">
           Email
           <input id="email" type="email" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)} />
@@ -41,6 +44,7 @@ export default function Login() {
         </label>
         {error && <p className="error" role="alert">{error}</p>}
         <button className="primary" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button>
+        <p className="muted" style={{ fontSize: 12.5 }}>Forgotten your password? Ask your administrator to reset it.</p>
       </form>
     </div>
   );

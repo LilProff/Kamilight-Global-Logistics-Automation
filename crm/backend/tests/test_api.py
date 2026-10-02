@@ -212,5 +212,5 @@ def test_webhook_verify(client):
 def test_import_endpoint(client):
     csv = b"Name,Phone,Tag\nAda,08031111111,existing client\nBad,123,\n"
     r = client.post("/api/contacts/import", files={"file": ("list.csv", csv, "text/csv")}, data={"opt_in": "true"}).json()
-    assert r["created"] == 1 and r["skipped"] == 1
+    assert r["created"] == 2 and r["needs_fix"] == 1 and r["skipped"] == 0
     assert client.get("/api/stats").json()["marketing_consent"] == 1

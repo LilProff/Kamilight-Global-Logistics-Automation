@@ -3,7 +3,7 @@ from datetime import timedelta
 
 import pytest
 from openpyxl import Workbook
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.filters import contacts_query
 from app.importer import import_contacts
@@ -59,7 +59,10 @@ def test_import_maps_columns_tags_and_dedupes(db):
         [None, None, None, None, None],
     ])
     report = import_contacts(db, "list.xlsx", data, opt_in=True)
-    assert (report.rows, report.created, report.skipped) == (6, 4, 2)
+    # Chika's number is one digit short: she is kept (tagged fix-phone) rather than thrown away
+    assert (report.rows, report.created, report.skipped, report.needs_fix) == (6, 5, 1, 1)
+    chika = db.scalar(select(Contact).where(Contact.name == "Chika"))
+    assert chika.phone is None and "fix-phone" in chika.tag_list and "0803333333" in chika.notes and not chika.wa_opt_in
     ada = db.scalar(select(Contact).where(Contact.phone == "+2348031111111"))
     assert (ada.name, ada.status, ada.city, ada.wa_opt_in) == ("Ada Obi", "booked", "Ikeja", True)
     assert db.scalar(select(Contact).where(Contact.phone == "+2348032222222")).status == "dormant"
@@ -68,7 +71,7 @@ def test_import_maps_columns_tags_and_dedupes(db):
     assert db.scalar(select(Contact).where(Contact.email == "efe@x.com")).status == "vip"
 
     again = import_contacts(db, "list.xlsx", data)
-    assert again.created == 0 and again.updated == 4
+    assert again.created == 0 and again.updated == 5 and db.scalar(select(func.count()).select_from(Contact)) == 5
     assert db.scalar(select(Contact).where(Contact.phone == "+2348031111111")).name == "Ada Obi"
 
 
@@ -96,6 +99,25 @@ def test_import_duplicate_rows_keep_the_better_status(db):
     assert (report.created, report.skipped) == (1, 1)
     ada = db.scalar(select(Contact))
     assert ada.status == "booked" and "existing customer" in ada.notes and "potential c" in ada.notes
+
+
+def test_import_keeps_every_row_and_survives_oversized_cells(db):
+    long_city = "x" * 400
+    csv = (
+        "S/N,NAME OF CUSTOMER,PHONE NUMBER,EMAIL,REMARK,LOCATION\n"
+        f"7,Tola Adeyemi,0803 12,,existing customer,{long_city}\n"  # bad number, huge city
+        "8,Nobody Phone,,,past customer,\n"  # no number at all
+        ",,,,,\n"  # entirely blank
+    ).encode()
+    report = import_contacts(db, "x.csv", csv)
+    assert (report.created, report.needs_fix) == (2, 2)
+    tola = db.scalar(select(Contact).where(Contact.name == "Tola Adeyemi"))
+    assert tola.status == "booked" and len(tola.city) == 120  # cut to the column size, not an error
+    assert "0803 12" in tola.notes and "list S/N 7" in tola.notes and tola.phone is None
+    nobody = db.scalar(select(Contact).where(Contact.name == "Nobody Phone"))
+    assert nobody.status == "dormant" and "No phone number in the sheet" in nobody.notes
+    # importing the same sheet again does not duplicate them
+    assert import_contacts(db, "x.csv", csv).created == 0
 
 
 def test_import_csv_without_phone_or_email_column(db):

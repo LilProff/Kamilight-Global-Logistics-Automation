@@ -1,15 +1,16 @@
 import { useEffect, useState } from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
 import { api, setToken } from "../api";
-import type { Stats } from "../types";
+import type { Me, Stats } from "../types";
+import Logo from "./Logo";
 
 export default function Layout() {
   const nav = useNavigate();
-  const [email, setEmail] = useState("");
+  const [me, setMe] = useState<Me | null>(null);
   const [waLive, setWaLive] = useState<boolean | null>(null);
 
   useEffect(() => {
-    api.get<{ email: string }>("/auth/me").then((r) => setEmail(r.email)).catch(() => {});
+    api.get<Me>("/auth/me").then(setMe).catch(() => {});
     api.get<Stats>("/stats").then((s) => setWaLive(s.channels.whatsapp)).catch(() => {});
   }, []);
 
@@ -22,14 +23,20 @@ export default function Layout() {
     <div className="shell">
       <nav className="side" aria-label="Main">
         <div className="brand">
-          KGL <span>·</span> Customers
+          <Logo variant="white" height={26} />
+          <span className="brand-sub">Customers</span>
         </div>
         <NavLink to="/" end>Dashboard</NavLink>
         <NavLink to="/customers">Customers</NavLink>
         <NavLink to="/segments">Segments</NavLink>
         <NavLink to="/campaigns">Campaigns</NavLink>
+        <NavLink to="/automations">Automations</NavLink>
+        <NavLink to="/team">{me?.role === "admin" ? "Team" : "My account"}</NavLink>
         <div className="spacer" />
-        <div className="who">{email}</div>
+        <div className="who">
+          {me?.name || me?.email}
+          {me && <span className="role">{me.role === "admin" ? "Administrator" : "Staff"}</span>}
+        </div>
         <button className="ghost" style={{ color: "#c9d2d9" }} onClick={signOut}>
           Sign out
         </button>
@@ -41,7 +48,7 @@ export default function Layout() {
             KGL's WhatsApp Business credentials to go live.
           </div>
         )}
-        <Outlet />
+        {me ? <Outlet context={{ me }} /> : <p className="muted">Loading…</p>}
       </main>
     </div>
   );

@@ -26,10 +26,11 @@ for (let i = 0; i < 60; i++) {
   rows.push(`${i + 1},${names[i % 10]} Tester${i},0803${String(1000000 + i)},${i % 5 === 0 ? `t${i}@example.com` : ""},${remark}`);
 }
 rows.push("61,Ada Tester0 (again),+234 803 1000000,,existing customer"); // duplicate of row 1
-rows.push("62,Broken Number,0803123,,potential c"); // bad phone
-rows.push("63,No Phone,,,potential c"); // blank phone
 const csvPath = path.join(os.tmpdir(), "kgl-e2e-list.csv");
 fs.writeFileSync(csvPath, rows.join("\n"));
+// a second sheet whose customers have a wrong number and no number: they must be KEPT, not dropped
+const fixCsvPath = path.join(os.tmpdir(), "kgl-e2e-fix.csv");
+fs.writeFileSync(fixCsvPath, ["S/N,NAME OF CUSTOMER,PHONE NUMBER,EMAIL,REMARK", "70,Broken Number,0803123,,existing customer", "71,No Phone Person,,,potential c"].join("\n"));
 
 // ---- tiny harness ----
 const results = [];
@@ -82,6 +83,12 @@ await step("logged-out visit to /customers redirects to login", async () => {
   await page.goto(BASE + "/customers");
   await until(async () => page.url().endsWith("/login"), "redirect to /login");
 });
+await step("login page shows the Kamilight logo (image really loads)", async () => {
+  const logo = page.getByRole("img", { name: "Kamilight" });
+  await logo.waitFor();
+  ok(await logo.evaluate((i) => i.complete && i.naturalWidth > 100), "logo image failed to load");
+  ok((await page.locator("link[rel=icon]").getAttribute("href")) === "/icon-64.png", "favicon missing");
+});
 await step("wrong password shows an error and stays on login", async () => {
   await page.getByLabel("Email").fill(EMAIL);
   await page.getByLabel("Password").fill("nope");
@@ -89,11 +96,25 @@ await step("wrong password shows an error and stays on login", async () => {
   await page.getByText("Email or password is wrong.").waitFor();
   ok(page.url().endsWith("/login"), "should still be on /login");
 });
+await step("repeated wrong passwords lock that email out, with a clear message", async () => {
+  await page.getByLabel("Email").fill("intruder@example.com");
+  for (let i = 0; i < 5; i++) {
+    await page.getByLabel("Password").fill("guess" + i);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    await until(async () => (await page.getByRole("button", { name: /Sign in/ }).isEnabled()), "login attempt to finish");
+  }
+  await page.getByLabel("Password").fill("guess-again");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByText(/Too many failed attempts/).waitFor();
+  await page.getByLabel("Email").fill(EMAIL); // the real account is unaffected
+});
 await step("correct password signs in and shows dashboard + test-mode banner", async () => {
   await page.getByLabel("Password").fill(PASSWORD);
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("heading", { name: "Dashboard" }).waitFor();
   await page.getByText("Test mode.").waitFor();
+  await page.locator(".side").getByRole("img", { name: "Kamilight" }).waitFor(); // logo in the sidebar
+  await page.locator(".side .who", { hasText: "Administrator" }).waitFor();
 });
 await step("empty customer list shows the friendly empty state", async () => {
   await page.getByRole("link", { name: "Customers" }).first().click();
@@ -111,8 +132,7 @@ await step("import dialog: disabled without a file; imports a KGL-style sheet an
   await dlg.getByText(/new customers added/).waitFor();
   const t = (await dlg.innerText()).replace(/\n/g, " ");
   ok(/60\s*new customers added/.test(t), "expected 60 created: " + t.slice(0, 140));
-  ok(/3\s*rows skipped/.test(t), "expected 3 skipped: " + t.slice(0, 180));
-  await dlg.getByText(/Show problems/).click();
+  ok(/1\s*repeated rows were folded/.test(t), "expected the duplicate to be folded in: " + t.slice(0, 200));
   await dlg.getByRole("button", { name: "Done" }).click();
 });
 await step("list shows 60 customers; 50 rows on page 1; pagination works", async () => {
@@ -428,6 +448,165 @@ await step("dashboard numbers reflect the data; status bars link to filtered lis
   await waitCount(6);
 });
 
+// ============ IMPORT: NOTHING IS DROPPED ============
+await step("customers with a wrong or missing number are kept, tagged and easy to find", async () => {
+  await page.goto(BASE + "/customers");
+  await waitCount(60);
+  await page.getByRole("button", { name: "Import list" }).click();
+  const dlg = page.getByRole("dialog");
+  await page.locator("#import-file").setInputFiles(fixCsvPath);
+  await dlg.getByRole("button", { name: "Import", exact: true }).click();
+  await dlg.getByText(/new customers added/).waitFor();
+  const t = (await dlg.innerText()).replace(/\n/g, " ");
+  ok(/2\s*new customers added/.test(t) && /2\s*customers were kept but have no usable WhatsApp number/.test(t), "expected 2 kept without a number: " + t.slice(0, 220));
+  await dlg.getByRole("link", { name: "Show them" }).click();
+  await page.waitForURL(/fix-phone/);
+  await waitCount(2);
+  eq(await page.getByText("Needs a number").count(), 2, "'Needs a number' markers");
+  await page.locator("tbody tr", { hasText: "Broken Number" }).getByRole("link").click();
+  await page.getByRole("heading", { name: "Broken Number" }).waitFor();
+  const notes = await page.locator("#p-notes").inputValue();
+  ok(/Number in the sheet: 0803123/.test(notes) && /list S\/N 70/.test(notes) && /existing customer/.test(notes), "original details missing from notes: " + notes);
+  eq(await page.locator("#p-status").inputValue(), "booked", "status from remark");
+});
+
+// ============ AUTOMATIONS ============
+await step("automations page: three rules, all off, with live counts", async () => {
+  await page.getByRole("link", { name: "Automations", exact: true }).click();
+  await page.getByRole("heading", { name: "Automations", exact: true }).waitFor();
+  for (const title of ["Win back past customers", "Follow up on quotes", "Welcome new enquiries"]) {
+    await page.getByRole("region", { name: title }).waitFor();
+  }
+  const winback = page.getByRole("region", { name: "Win back past customers" });
+  ok((await winback.innerText()).replace(/\n/g, " ").includes("Qualify right now 4"), "4 dormant, opted-in customers should qualify");
+  eq(await page.locator(".pill.cs-sent", { hasText: "On" }).count(), 0, "nothing should be on yet");
+});
+await step("switching win-back on asks for confirmation, then sends by itself and reports it", async () => {
+  const winback = page.getByRole("region", { name: "Win back past customers" });
+  await winback.getByRole("button", { name: "Switch on" }).click();
+  const dlg = page.getByRole("dialog");
+  await dlg.getByText(/About 4 customers qualify/).waitFor();
+  await dlg.getByText(/rehearsal/).waitFor(); // test mode explained
+  await dlg.getByRole("button", { name: "Yes, switch on" }).click();
+  await winback.locator(".pill", { hasText: "On" }).waitFor();
+  await until(async () => (await winback.innerText()).replace(/\n/g, " ").includes("Sent so far 4"), "win-back to message the 4 customers", 40000);
+  ok((await winback.innerText()).replace(/\n/g, " ").includes("Qualify right now 0"), "nobody left to message");
+});
+await step("the automatic campaign shows under Campaigns and reached exactly the 4 past customers", async () => {
+  await page.getByRole("link", { name: "Campaigns" }).first().click();
+  const row = page.locator("tbody tr", { hasText: "Auto: Win back past customers" });
+  await row.waitFor();
+  await until(async () => /Sent/.test(await row.innerText()), "automatic campaign to finish sending", 20000);
+  await row.click();
+  await page.waitForURL(/\/campaigns\/\d+$/);
+  await until(async () => (await page.locator("tbody tr").count()) === 4, "4 recipients");
+  const names = await page.locator("tbody tr td:first-child").allInnerTexts();
+  ok(names.every((n) => /Tester(6|7|8|9)$/.test(n.trim())), "should only be the 4 past customers: " + names.join(", "));
+});
+await step("switching it off stops it, and a second pass doesn't message anyone twice", async () => {
+  await page.getByRole("link", { name: "Automations", exact: true }).click();
+  const winback = page.getByRole("region", { name: "Win back past customers" });
+  await winback.getByRole("button", { name: "Switch off" }).click();
+  await winback.locator(".pill", { hasText: "Off" }).waitFor();
+  eq(await winback.getByText("Sent so far").locator("xpath=following-sibling::b").innerText(), "4", "still 4 sent in total");
+});
+await step("enabling an automation with no message is refused", async () => {
+  const quote = page.getByRole("region", { name: "Follow up on quotes" });
+  await quote.locator("textarea").fill("");
+  await quote.getByRole("button", { name: "Switch on" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Yes, switch on" }).click();
+  await quote.getByText("Write the message first.").waitFor();
+});
+
+// ============ TEAM, ROLES AND PASSWORDS ============
+let staffPassword = "";
+await step("admin adds a staff member (suggested strong password) and sees them listed", async () => {
+  await page.getByRole("link", { name: "Team", exact: true }).click();
+  await page.getByRole("heading", { name: "Staff accounts" }).waitFor();
+  await page.getByRole("button", { name: "Add staff member" }).click();
+  const dlg = page.getByRole("dialog");
+  await dlg.locator("#new-name").fill("Tola Staff");
+  await dlg.locator("#new-email").fill("tola@example.com");
+  await dlg.getByRole("button", { name: "Suggest" }).click();
+  staffPassword = await dlg.locator("#new-password").inputValue();
+  ok(staffPassword.length >= 12, "suggested password too short");
+  await dlg.locator("#new-password").fill("short");
+  await dlg.getByRole("button", { name: "Add staff member" }).click();
+  await dlg.getByText(/at least 10 characters/).waitFor(); // weak passwords are refused
+  await dlg.locator("#new-password").fill(staffPassword);
+  await dlg.getByRole("button", { name: "Add staff member" }).click();
+  await page.getByRole("dialog").waitFor({ state: "detached" });
+  const row = page.locator("tbody tr", { hasText: "tola@example.com" });
+  await row.waitFor();
+  ok(/Staff/.test(await row.innerText()) && /Active/.test(await row.innerText()), "new staff row should be Active");
+});
+await step("change-password form refuses a wrong current password, a mismatch and a weak password", async () => {
+  await page.locator("#pw-current").fill("not-my-password");
+  await page.locator("#pw-new").fill("river-Lantern-47-moss");
+  await page.locator("#pw-again").fill("river-Lantern-47-moss");
+  await page.getByRole("button", { name: "Change password" }).click();
+  await page.getByText("Your current password isn't right.").waitFor();
+  await page.locator("#pw-again").fill("different-Lantern-47-moss");
+  await page.getByRole("button", { name: "Change password" }).click();
+  await page.getByText("The two new passwords don't match.").waitFor();
+  await page.locator("#pw-current").fill(PASSWORD);
+  await page.locator("#pw-new").fill("password");
+  await page.locator("#pw-again").fill("password");
+  await page.getByRole("button", { name: "Change password" }).click();
+  await page.getByText(/at least 10 characters/).waitFor();
+});
+await step("staff member signs in: sees 'My account' only, can't change automations", async () => {
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.waitForURL(/\/login$/);
+  await page.getByLabel("Email").fill("tola@example.com");
+  await page.getByLabel("Password").fill(staffPassword);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("heading", { name: "Dashboard" }).waitFor();
+  await page.getByText("Tola Staff").first().waitFor();
+  await page.getByRole("link", { name: "My account" }).click();
+  await page.getByRole("heading", { name: "My account" }).waitFor();
+  eq(await page.getByRole("heading", { name: "Staff accounts" }).count(), 0, "staff must not see account management");
+  await page.getByRole("link", { name: "Automations", exact: true }).click();
+  await page.getByText("Only an administrator can change automations.").waitFor();
+  eq(await page.getByRole("button", { name: "Switch on" }).count(), 0, "staff must not see Switch on");
+  await page.goto(BASE + "/customers");
+  await waitCount(62); // staff can work with customers
+});
+await step("staff member changes their own password; the old one stops working", async () => {
+  await page.getByRole("link", { name: "My account" }).click();
+  await page.locator("#pw-current").fill(staffPassword);
+  await page.locator("#pw-new").fill("harbour-Maple-58-coast");
+  await page.locator("#pw-again").fill("harbour-Maple-58-coast");
+  await page.getByRole("button", { name: "Change password" }).click();
+  await page.getByText(/Password changed/).waitFor();
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByLabel("Email").fill("tola@example.com");
+  await page.getByLabel("Password").fill(staffPassword);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByText("Email or password is wrong.").waitFor();
+  await page.getByLabel("Password").fill("harbour-Maple-58-coast");
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("heading", { name: "Dashboard" }).waitFor();
+});
+await step("admin deactivates the staff member; they can no longer sign in", async () => {
+  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByLabel("Email").fill(EMAIL);
+  await page.getByLabel("Password").fill(PASSWORD);
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByRole("heading", { name: "Dashboard" }).waitFor();
+  await page.getByRole("link", { name: "Team", exact: true }).click();
+  const row = page.locator("tbody tr", { hasText: "tola@example.com" });
+  await row.getByRole("button", { name: "Edit" }).click();
+  const dlg = page.getByRole("dialog");
+  await dlg.locator("#edit-active").uncheck();
+  await dlg.getByRole("button", { name: "Save" }).click();
+  await row.getByText("Deactivated").waitFor();
+  const adminRow = page.locator("tbody tr", { hasText: EMAIL });
+  await adminRow.getByRole("button", { name: "Edit" }).click();
+  ok(await page.getByRole("dialog").locator("#edit-active").isDisabled(), "admin shouldn't be able to deactivate themselves");
+  await page.keyboard.press("Escape");
+});
+
 // ============ SESSION ============
 await step("sign out returns to login and protects the pages again", async () => {
   await page.getByRole("button", { name: "Sign out" }).click();
@@ -450,7 +629,7 @@ await step("phone layout (390px): no page-level sideways scroll on any screen", 
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("heading", { name: "Dashboard" }).waitFor();
   const bad = [];
-  for (const url of ["/", "/customers", "/segments", "/campaigns", "/campaigns/new"]) {
+  for (const url of ["/", "/customers", "/segments", "/campaigns", "/campaigns/new", "/automations", "/team"]) {
     await page.goto(BASE + url);
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(400);
@@ -472,7 +651,7 @@ await browser.close();
 
 // ---- report ----
 const failed = results.filter((r) => !r.ok);
-const unexpected = badRequests.filter((b) => !/^(401|404|409|422) /.test(b));
+const unexpected = badRequests.filter((b) => !/^(401|404|409|422|429) /.test(b));
 console.log("\n==== SUMMARY ====");
 console.log(`${results.length - failed.length}/${results.length} steps passed`);
 console.log(`API 4xx responses seen: ${badRequests.length} (validation/auth refusals the steps provoke on purpose); unexpected (5xx or other): ${unexpected.length}`);

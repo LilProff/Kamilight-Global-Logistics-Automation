@@ -1,4 +1,4 @@
-"""Login, dashboard numbers, and the public WhatsApp webhook."""
+"""Dashboard numbers and the public WhatsApp webhook. (Sign-in lives in routers/auth.py.)"""
 
 import hashlib
 import hmac
@@ -10,27 +10,14 @@ from fastapi.responses import PlainTextResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.auth import check_login, current_user, issue_token
+from app.auth import current_user
 from app.config import get_settings
 from app.db import get_db
 from app.inbound import handle_webhook
 from app.messaging import channel_live
 from app.models import Campaign, CampaignRecipient, Contact, utcnow
-from app.schemas import LoginIn
 
 router = APIRouter(prefix="/api")
-
-
-@router.post("/auth/login", tags=["auth"])
-def login(body: LoginIn):
-    if not check_login(body.email, body.password):
-        raise HTTPException(401, "Email or password is wrong.")
-    return {"token": issue_token(body.email), "email": body.email}
-
-
-@router.get("/auth/me", tags=["auth"])
-def me(user: str = Depends(current_user)):
-    return {"email": user}
 
 
 @router.get("/stats", tags=["dashboard"], dependencies=[Depends(current_user)])
