@@ -5,7 +5,7 @@ from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import CampaignRecipient, Contact, ContactEvent, utcnow
+from app.models import CampaignRecipient, Contact, ContactEvent, WebhookEvent, utcnow
 from app.phone import normalize_phone
 
 STOP_WORDS = {"stop", "unsubscribe", "stop all", "opt out", "optout", "cancel"}
@@ -92,6 +92,12 @@ def handle_webhook(db: Session, payload: dict) -> dict:
                 handle_status(db, st)
                 statuses += 1
             for msg in value.get("messages", []):
+                wamid = msg.get("id")
+                if wamid:
+                    if db.get(WebhookEvent, wamid) is not None:
+                        continue  # Meta retried a message we already handled
+                    db.add(WebhookEvent(id=wamid))
+                    db.flush()
                 handle_message(db, msg, names.get(msg.get("from"), ""))
                 messages += 1
     db.commit()

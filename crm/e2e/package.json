@@ -1,0 +1,7 @@
+{
+  "name": "kgl-crm-e2e",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node run.mjs" },
+  "devDependencies": { "playwright-core": "^1.49.0" }
+}

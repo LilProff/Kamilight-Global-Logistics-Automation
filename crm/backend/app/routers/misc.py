@@ -73,11 +73,15 @@ def verify(
 @router.post("/webhooks/whatsapp", tags=["webhooks"])
 async def receive(request: Request, db: Session = Depends(get_db)):
     raw = await request.body()
-    secret = get_settings().wa_app_secret
+    settings = get_settings()
+    secret = settings.wa_app_secret
     if secret:
         expected = "sha256=" + hmac.new(secret.encode(), raw, hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected, request.headers.get("x-hub-signature-256", "")):
             raise HTTPException(403, "Bad signature")
+    elif settings.wa_token:
+        # WhatsApp is live: never accept unsigned events, anyone could forge STOP replies or fake enquiries
+        raise HTTPException(503, "Webhook is not configured: set WA_APP_SECRET")
     try:
         payload = json.loads(raw or b"{}")
     except json.JSONDecodeError:

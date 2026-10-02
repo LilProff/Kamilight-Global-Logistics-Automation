@@ -86,7 +86,14 @@ def test_campaign_end_to_end(client):
     utility = client.post("/api/campaigns/preview", json={"filters": spec, "category": "utility"}).json()
     assert utility["will_receive"] == 2 and utility["estimated_cost_ngn"] == 28
 
-    assert client.post("/api/campaigns", json={"name": "Empty", "filters": spec}).status_code == 422
+    # A half-finished draft can be saved, but it can't be sent until it has a message
+    empty = client.post("/api/campaigns", json={"name": "Empty", "filters": spec})
+    assert empty.status_code == 201
+    refused = client.post(f"/api/campaigns/{empty.json()['id']}/send", json={})
+    assert refused.status_code == 422 and "Write a message" in refused.json()["detail"]
+    assert client.post("/api/campaigns", json={"name": "Mail", "channel": "email", "body": "x"}).status_code == 201
+    mail = client.get("/api/campaigns").json()[0]["id"]
+    assert "subject" in client.post(f"/api/campaigns/{mail}/send", json={}).json()["detail"]
     camp = client.post("/api/campaigns", json={
         "name": "Friday cut-off", "filters": spec, "body": "Hi {first_name}, China air closes Friday. {city} pickup free.",
     }).json()
@@ -157,6 +164,42 @@ def test_webhook_receipts_replies_and_stop(client):
     }))
     page = client.post("/api/contacts/search", json={"filters": {"sources": ["whatsapp"]}}).json()
     assert page["total"] == 1 and page["items"][0]["name"] == "New Buyer"
+
+
+def test_webhook_retries_do_not_duplicate_messages(client):
+    a = _contact(client, name="Ada", phone="08031111111", wa_opt_in=True)
+    event = _wa({"messages": [{"id": "wamid.ABC", "from": "2348031111111", "type": "text", "text": {"body": "How much?"}}]})
+    first = client.post("/api/webhooks/whatsapp", json=event).json()
+    retry = client.post("/api/webhooks/whatsapp", json=event).json()  # Meta resends when it doesn't see a fast 200
+    assert first["messages"] == 1 and retry["messages"] == 0
+    inbound = [e for e in client.get(f"/api/contacts/{a['id']}").json()["events"] if e["kind"] == "inbound"]
+    assert len(inbound) == 1
+
+
+def test_webhook_requires_signature_when_whatsapp_is_live(client, monkeypatch):
+    import hashlib
+    import hmac as hmac_mod
+    import json
+
+    from app.config import get_settings
+
+    s = get_settings()
+    monkeypatch.setattr(s, "wa_token", "live-token")
+    monkeypatch.setattr(s, "wa_app_secret", "")
+    assert client.post("/api/webhooks/whatsapp", json={"entry": []}).status_code == 503  # no secret configured: refuse
+
+    monkeypatch.setattr(s, "wa_app_secret", "shh")
+    assert client.post("/api/webhooks/whatsapp", json={"entry": []}).status_code == 403  # unsigned
+    body = json.dumps({"entry": []}).encode()
+    good = "sha256=" + hmac_mod.new(b"shh", body, hashlib.sha256).hexdigest()
+    ok = client.post("/api/webhooks/whatsapp", content=body, headers={"x-hub-signature-256": good, "content-type": "application/json"})
+    assert ok.status_code == 200
+    bad = client.post("/api/webhooks/whatsapp", content=body, headers={"x-hub-signature-256": "sha256=00", "content-type": "application/json"})
+    assert bad.status_code == 403
+
+
+def test_health_aliases(client):
+    assert client.get("/healthz").json() == {"ok": True}
 
 
 def test_webhook_verify(client):

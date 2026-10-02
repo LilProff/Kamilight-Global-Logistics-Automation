@@ -103,7 +103,16 @@ class Segment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
-CAMPAIGN_STATUSES = ["draft", "scheduled", "sending", "sent", "cancelled"]
+class WebhookEvent(Base):
+    """WhatsApp message ids we've already processed, so Meta's retries never create duplicates."""
+
+    __tablename__ = "webhook_events"
+
+    id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+CAMPAIGN_STATUSES =["draft", "scheduled", "sending", "sent", "cancelled"]
 RECIPIENT_STATUSES = ["queued", "sent", "delivered", "read", "failed", "skipped"]
 
 

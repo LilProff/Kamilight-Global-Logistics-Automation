@@ -26,14 +26,18 @@ def _get(db: Session, campaign_id: int) -> Campaign:
 
 
 def _validate(db: Session, body: CampaignIn) -> None:
+    """Checks for saving a draft. Half-finished drafts are fine; completeness is checked when sending."""
     if body.segment_id and db.get(Segment, body.segment_id) is None:
         raise HTTPException(422, "That segment no longer exists.")
-    if body.channel == "email" and not body.subject.strip():
-        raise HTTPException(422, "Email campaigns need a subject line.")
-    if not body.body.strip() and not body.wa_template_name and not body.media_url:
-        raise HTTPException(422, "Write a message, attach media, or pick a WhatsApp template.")
     if body.media_url and not body.media_type:
         raise HTTPException(422, "Say whether the attachment is an image, video or document.")
+
+
+def _validate_ready_to_send(campaign: Campaign) -> None:
+    if campaign.channel == "email" and not campaign.subject.strip():
+        raise HTTPException(422, "Email campaigns need a subject line.")
+    if not campaign.body.strip() and not campaign.wa_template_name and not campaign.media_url:
+        raise HTTPException(422, "Write a message, attach media, or pick a WhatsApp template.")
 
 
 @router.post("/preview")
@@ -92,6 +96,7 @@ def send(campaign_id: int, body: ScheduleIn, db: Session = Depends(get_db)):
     campaign = _get(db, campaign_id)
     if campaign.status not in ("draft", "scheduled"):
         raise HTTPException(409, f"This campaign is already {campaign.status}.")
+    _validate_ready_to_send(campaign)
     if campaign.channel == "whatsapp" and campaign.category == "marketing" and not campaign.wa_template_name and channel_live("whatsapp"):
         # Meta only delivers free-form messages inside the 24h window after a customer's last message
         raise HTTPException(422, "WhatsApp marketing messages need an approved template. Pick one before sending.")

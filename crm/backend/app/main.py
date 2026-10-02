@@ -40,6 +40,7 @@ for r in (contacts.router, segments.router, campaigns.router, misc.router):
     app.include_router(r)
 
 
+@app.get("/healthz")
 @app.get("/health")
 def health():
     """Is the app up? Kept independent of the database so Render doesn't restart-loop if the DB is down."""
