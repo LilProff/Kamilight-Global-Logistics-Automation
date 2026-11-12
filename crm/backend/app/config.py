@@ -35,6 +35,13 @@ class Settings(BaseSettings):
     wa_verify_token: str = "kgl-verify"
     wa_app_secret: str = ""  # required for the webhook once wa_token is set
 
+    # AI assistant (Anthropic). Leave the key empty and the AI stays off.
+    anthropic_api_key: str = ""
+    anthropic_base_url: str = "https://api.anthropic.com"  # only changed by tests, to point at a fake model
+    ai_model: str = "claude-haiku-5-5"
+    ai_max_tokens: int = 700
+    ai_debounce_seconds: int = 6  # wait for a customer to finish typing several short messages
+
     # Email (optional)
     smtp_host: str = ""
     smtp_port: int = 587

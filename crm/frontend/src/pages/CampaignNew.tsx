@@ -37,6 +37,23 @@ export default function CampaignNew() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [campaignId, setCampaignId] = useState<number | null>(id ? Number(id) : null);
+  const [aiGoal, setAiGoal] = useState("");
+  const [aiBusy, setAiBusy] = useState(false);
+  const [aiError, setAiError] = useState("");
+
+  async function writeWithAi() {
+    setAiError("");
+    setAiBusy(true);
+    try {
+      const audience = segments.find((s) => s.id === draft.segment_id)?.name ?? "";
+      const r = await api.post<{ text: string }>("/ai/draft", { goal: aiGoal, audience, category: draft.category, channel: draft.channel });
+      setDraft((d) => ({ ...d, body: r.text }));
+    } catch (e) {
+      setAiError((e as Error).message);
+    } finally {
+      setAiBusy(false);
+    }
+  }
 
   useEffect(() => { api.get<Segment[]>("/segments").then(setSegments).catch(() => {}); }, []);
   useEffect(() => {
@@ -172,6 +189,13 @@ export default function CampaignNew() {
                   )}
                 </div>
               )}
+              <div className="row" style={{ alignItems: "flex-end" }}>
+                <label className="field" style={{ flex: 1, minWidth: 220 }}>Write it with AI: what is this message for?
+                  <input id="c-ai-goal" value={aiGoal} onChange={(e) => setAiGoal(e.target.value)} placeholder="e.g. Remind importers the China air cut-off is Friday" />
+                </label>
+                <button type="button" onClick={writeWithAi} disabled={aiBusy || aiGoal.trim().length < 3}>{aiBusy ? "Writing…" : "Write with AI"}</button>
+              </div>
+              {aiError && <p className="error" role="alert">{aiError}</p>}
               <label className="field">
                 {templateMode ? "Message text for the preview and timeline (the approved template is what's sent)" : "Message"}
                 <textarea id="c-body" rows={7} value={draft.body} onChange={(e) => set("body", e.target.value)} placeholder="Hi {first_name}, the China air consolidation closes Friday 5pm…" />

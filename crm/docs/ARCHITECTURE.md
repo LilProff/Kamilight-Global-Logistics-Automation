@@ -25,7 +25,10 @@ Context: **B, client system** (see the architecture rules): go-live is paid, alw
 Alternatives considered and rejected: Supabase-only (pg_cron + Edge Functions) would need a rewrite for no cost win (the host is $7/month); Cloud Run min-instances 0 stalls the in-process sender; Next.js adds nothing (no SEO need). No rewrite is planned.
 
 ## Data model (5 core tables + 1)
-`contacts` (profile, status, consent, totals) · `contact_events` (timeline) · `segments` (saved filters) · `campaigns` · `campaign_recipients` (frozen audience + delivery status) · `webhook_events` (processed WhatsApp message ids).
+`contacts` (profile, status, consent, totals) · `contact_events` (timeline) · `segments` (saved filters) · `campaigns` · `campaign_recipients` (frozen audience + delivery status) · `webhook_events` (processed WhatsApp message ids) · `messages` (every WhatsApp message in or out, who sent it: customer / AI / staff) · `conversations` (inbox state: awaiting reply, needs a person, AI paused, unread) · `ai_settings` (on/off, the knowledge the AI may state, daily cap).
+
+## AI assistant (`app/ai.py`)
+Inbound WhatsApp text is stored and queued. The background worker picks up a waiting chat a few seconds after the last message (so several quick messages become one question), calls the Anthropic Messages API with KGL's written knowledge plus the customer's CRM record, and sends the answer as a free-form WhatsApp reply inside the 24-hour window. The model has four narrow tools only: save customer details, log a quote request, ask for a person, plan a follow-up. It cannot change status, consent, prices or phone numbers. It never replies to opted-out or do-not-contact customers, to voice notes or images (staff are alerted), after a staff reply (the chat is paused for the AI), or beyond a per-customer daily cap. Any AI or delivery error hands the chat to staff instead of going silent. Off by default; needs `ANTHROPIC_API_KEY` and an administrator to switch it on.
 
 ## Key behaviours
 - **Consent:** WhatsApp *marketing* only reaches customers with recorded opt-in; STOP opts out instantly and permanently; do-not-contact always excluded; rechecked at send time.

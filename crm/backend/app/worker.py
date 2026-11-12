@@ -1,10 +1,11 @@
 """Background loop: starts scheduled campaigns, sends queued messages at a safe pace, runs the automatic
-campaigns, and marks customers dormant daily."""
+campaigns, answers waiting WhatsApp chats with the AI, and marks customers dormant daily."""
 
 import logging
 import threading
 import time
 
+from app.ai import process_pending
 from app.automations import run_automations
 from app.campaigns import process_batch, start_due
 from app.config import get_settings
@@ -45,6 +46,7 @@ class Worker:
                 queued = run_automations(db)
                 if queued:
                     log.info("Automations queued %s messages", queued)
+            process_pending(db)
             process_batch(db, limit=batch)
 
     def _run(self) -> None:

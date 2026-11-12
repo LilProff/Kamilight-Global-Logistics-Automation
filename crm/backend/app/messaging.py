@@ -79,9 +79,18 @@ class WhatsAppSender(Sender):
             msg |= {"type": "text", "text": {"body": body, "preview_url": True}}
         return msg
 
+    def send_text(self, contact: Contact, body: str) -> SendResult:
+        """A free-form reply. WhatsApp only allows this within 24 hours of the customer's last message."""
+        msg = {"messaging_product": "whatsapp", "recipient_type": "individual", "to": wa_id(contact.phone or ""),
+               "type": "text", "text": {"body": body[:4000], "preview_url": True}}
+        return self._post(msg)
+
     def send(self, contact: Contact, campaign: Campaign, body: str) -> SendResult:
+        return self._post(self.payload(contact, campaign, body))
+
+    def _post(self, message: dict) -> SendResult:
         try:
-            r = self.client.post(self.url, json=self.payload(contact, campaign, body))
+            r = self.client.post(self.url, json=message)
         except httpx.HTTPError as exc:
             return SendResult(ok=False, error=f"Network error: {exc}"[:500])
         data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
@@ -117,6 +126,13 @@ def channel_live(channel: str) -> bool:
     if channel == "email":
         return bool(s.smtp_host)
     return False
+
+
+def send_text(contact: Contact, body: str) -> SendResult:
+    """Reply inside a conversation. In test mode nothing leaves but the result looks real."""
+    if not channel_live("whatsapp"):
+        return SendResult(ok=True, message_id=f"test-{uuid.uuid4().hex[:16]}")
+    return WhatsAppSender().send_text(contact, body)
 
 
 def get_sender(channel: str) -> Sender:

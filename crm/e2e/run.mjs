@@ -42,6 +42,7 @@ async function step(name, fn) {
     results.push({ name, ok: true });
     console.log(`PASS  ${name}`);
   } catch (e) {
+    await page.screenshot({ path: path.join(shots, `fail-${results.length + 1}.png`) }).catch(() => {});
     results.push({ name, ok: false, err: String(e.message || e).split("\n")[0] });
     console.log(`FAIL  ${name}\n      ${String(e.message || e).split("\n")[0]}`);
   }
@@ -607,6 +608,80 @@ await step("admin deactivates the staff member; they can no longer sign in", asy
   await page.keyboard.press("Escape");
 });
 
+// ============ AI ASSISTANT AND INBOX ============
+// A stand-in AI service (fake-model.mjs) answers, so this runs without a key. The webhook is posted exactly as Meta would.
+const whatsapp = (from, id, body, name) =>
+  ctx.request.post(BASE + "/api/webhooks/whatsapp", {
+    data: { entry: [{ changes: [{ value: { contacts: [{ wa_id: from, profile: { name } }], messages: [{ from, id, type: "text", text: { body } }] } }] }] },
+  });
+const KNOWLEDGE_TEXT = "KGL ships from China by air and sea to Lagos, and from the UK and the US. To book, send route, goods and weight on WhatsApp and we confirm the price.";
+
+await step("AI assistant page: connected, off, and refuses to switch on with no knowledge written", async () => {
+  await page.getByRole("link", { name: "AI assistant", exact: true }).click();
+  await page.getByRole("heading", { name: "AI assistant", exact: true }).waitFor();
+  eq(await page.getByText("Not connected.").count(), 0, "AI should be connected in this run");
+  await page.locator(".pill", { hasText: "Off" }).waitFor();
+  await page.getByRole("button", { name: "Switch on" }).click();
+  await page.getByText(/Add what KGL offers/).waitFor();
+});
+await step("write the knowledge, switch the AI on, and try it as a customer", async () => {
+  await page.getByRole("button", { name: "Insert a starter outline" }).click();
+  await page.locator("#ai-knowledge").fill(KNOWLEDGE_TEXT);
+  await page.getByRole("button", { name: "Switch on" }).click();
+  await page.locator(".pill.cs-sent", { hasText: "On" }).waitFor();
+  await page.locator("#ai-test-input").fill("How much to ship phones?");
+  await page.getByRole("button", { name: "Send" }).click();
+  await page.getByText(/A colleague will confirm the exact details/).waitFor();
+  await page.getByText(/Logged a quote request/).waitFor();
+});
+await step("a customer writes on WhatsApp: the AI answers, logs the quote request and flags the chat", async () => {
+  const r = await whatsapp("2348090001111", "wamid.e2e.1", "Hi, how much to ship 2 cartons of phones by air?", "Tola Webhook");
+  eq(r.status(), 200, "webhook status");
+  await page.getByRole("link", { name: /^Inbox/ }).click();
+  await page.getByRole("heading", { name: "Inbox", exact: true }).waitFor();
+  const row = page.locator(".chat-row", { hasText: "Tola Webhook" });
+  await until(async () => (await row.count()) && /Needs a person/.test(await row.innerText()), "chat to appear flagged 'Needs a person'", 25000);
+  await until(async () => (await page.locator(".side .badge").count()) > 0, "sidebar badge", 25000);
+});
+await step("opening the chat shows the whole conversation and why it needs a person", async () => {
+  await page.locator(".chat-row", { hasText: "Tola Webhook" }).click();
+  await page.getByText(/Needs a person:/).waitFor();
+  await page.locator(".banner", { hasText: "Quote request" }).waitFor();
+  await page.locator(".msg.in .msg-body", { hasText: "how much to ship 2 cartons" }).waitFor();
+  await page.locator(".msg.out .msg-body", { hasText: "A colleague will confirm" }).waitFor();
+  await page.locator(".msg-meta", { hasText: "AI assistant" }).first().waitFor();
+});
+await step("staff replies: the AI steps aside, the flag clears, and later messages are left for the team", async () => {
+  await page.locator("#reply-text").fill("Hi Tola, this is Tunde from KGL. Price for 2 cartons by air is on its way.");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await page.locator(".msg.out .msg-meta", { hasText: "KGL team" }).waitFor();
+  await page.getByText(/Needs a person:/).waitFor({ state: "detached" });
+  await page.getByRole("button", { name: "Hand back to AI" }).waitFor();
+  eq((await whatsapp("2348090001111", "wamid.e2e.2", "ok thanks", "Tola Webhook")).status(), 200, "second webhook");
+  await page.locator(".msg.in .msg-body", { hasText: "ok thanks" }).waitFor({ timeout: 15000 });
+  await page.waitForTimeout(4000); // long enough for the AI to have answered if it were going to
+  eq(await page.locator(".msg.out").count(), 2, "AI reply and staff reply, and nothing more");
+});
+await step("a customer who shares details gets them saved on their profile by the AI", async () => {
+  await whatsapp("2348090002222", "wamid.e2e.3", "I am Bola, I import fabrics from China", "Bola Webhook");
+  const row = page.locator(".chat-row", { hasText: "Bola Webhook" });
+  await until(async () => (await row.count()) > 0, "Bola's chat", 20000);
+  await row.click();
+  await page.locator(".msg.out .msg-body").first().waitFor({ timeout: 20000 });
+  await page.getByRole("link", { name: "Open customer profile" }).click();
+  await page.waitForURL(/\/customers\/\d+$/);
+  eq(await page.locator("#p-city").inputValue(), "Ikeja", "city saved by the AI");
+  eq(await page.locator("#p-goods").inputValue(), "fabrics", "goods saved by the AI");
+  await page.getByText("AI updated customer details").first().waitFor();
+});
+await step("campaign builder: Write with AI fills in the message", async () => {
+  await page.goto(BASE + "/campaigns/new");
+  await page.getByRole("tab", { name: /Message/ }).click();
+  await page.locator("#c-ai-goal").fill("Remind importers about the Friday China air cut-off");
+  await page.getByRole("button", { name: "Write with AI" }).click();
+  await until(async () => (await page.locator("#c-body").inputValue()).includes("{first_name}"), "AI draft in the message box");
+});
+
 // ============ SESSION ============
 await step("sign out returns to login and protects the pages again", async () => {
   await page.getByRole("button", { name: "Sign out" }).click();
@@ -629,7 +704,7 @@ await step("phone layout (390px): no page-level sideways scroll on any screen", 
   await page.getByRole("button", { name: "Sign in" }).click();
   await page.getByRole("heading", { name: "Dashboard" }).waitFor();
   const bad = [];
-  for (const url of ["/", "/customers", "/segments", "/campaigns", "/campaigns/new", "/automations", "/team"]) {
+  for (const url of ["/", "/customers", "/segments", "/campaigns", "/campaigns/new", "/inbox", "/assistant", "/automations", "/team"]) {
     await page.goto(BASE + url);
     await page.waitForLoadState("networkidle");
     await page.waitForTimeout(400);

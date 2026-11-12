@@ -8,10 +8,15 @@ export default function Layout() {
   const nav = useNavigate();
   const [me, setMe] = useState<Me | null>(null);
   const [waLive, setWaLive] = useState<boolean | null>(null);
+  const [waiting, setWaiting] = useState(0);
 
   useEffect(() => {
     api.get<Me>("/auth/me").then(setMe).catch(() => {});
     api.get<Stats>("/stats").then((s) => setWaLive(s.channels.whatsapp)).catch(() => {});
+    const poll = () => api.get<{ needs_human: number }>("/inbox/summary").then((s) => setWaiting(s.needs_human)).catch(() => {});
+    poll();
+    const t = setInterval(poll, 15000);
+    return () => clearInterval(t);
   }, []);
 
   function signOut() {
@@ -28,8 +33,10 @@ export default function Layout() {
         </div>
         <NavLink to="/" end>Dashboard</NavLink>
         <NavLink to="/customers">Customers</NavLink>
+        <NavLink to="/inbox">Inbox{waiting > 0 && <span className="badge" aria-label={`${waiting} waiting for a person`}>{waiting}</span>}</NavLink>
         <NavLink to="/segments">Segments</NavLink>
         <NavLink to="/campaigns">Campaigns</NavLink>
+        <NavLink to="/assistant">AI assistant</NavLink>
         <NavLink to="/automations">Automations</NavLink>
         <NavLink to="/team">{me?.role === "admin" ? "Team" : "My account"}</NavLink>
         <div className="spacer" />

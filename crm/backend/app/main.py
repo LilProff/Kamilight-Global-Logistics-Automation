@@ -12,7 +12,7 @@ from app.auth import ensure_admin
 from app.automations import ensure_automations
 from app.config import assert_safe_to_run, get_settings
 from app.db import Base, SessionLocal, engine, harden_postgres
-from app.routers import auth, automations, campaigns, contacts, misc, segments, users
+from app.routers import ai, auth, automations, campaigns, contacts, inbox, misc, segments, users
 from app.worker import Worker
 
 logging.basicConfig(level=logging.INFO)
@@ -71,7 +71,7 @@ async def security_headers(request: Request, call_next):
     return response
 
 
-for r in (auth.router, users.router, contacts.router, segments.router, campaigns.router, automations.router, misc.router):
+for r in (auth.router, users.router, contacts.router, segments.router, campaigns.router, automations.router, inbox.router, ai.router, misc.router):
     app.include_router(r)
 
 

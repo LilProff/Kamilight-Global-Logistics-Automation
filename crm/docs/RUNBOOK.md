@@ -27,6 +27,7 @@ Render builds from branch `phase1-crm` (auto-deploy on push). Health check: `/he
 Three rules, **off until an administrator switches them on**: *Win back past customers* (status Dormant, opted in), *Follow up on quotes* (quoted, not booked, N days after the quote), *Welcome new enquiries* (first WhatsApp message, once). A background pass runs every 5 minutes, only 08:00-19:00 Lagos time, caps each rule at its daily limit, and never messages the same person twice within the cool-down. Messages go through the normal campaign engine, so each day's run appears under Campaigns as `Auto: <rule> (<date>)` with delivery, read and reply counts, and consent, STOP and test mode are honoured. With WhatsApp live, the marketing rule also needs an approved template name. To pause everything instantly: switch the rule off.
 
 ## Go live with WhatsApp
+Step-by-step with Meta's screens, the AI switch-on and the pre-launch checklist: see [WHATSAPP_AND_AI_SETUP.md](WHATSAPP_AND_AI_SETUP.md). Summary:
 1. KGL's Meta business verified, number added, display name approved.
 2. Set `WA_APP_SECRET`, `WA_PHONE_NUMBER_ID`, `WA_VERIFY_TOKEN`, then `WA_TOKEN`. The dashboard's "Test mode" banner disappears.
 3. Meta → WhatsApp → Configuration: callback `https://<service>/api/webhooks/whatsapp`, the verify token, subscribe to `messages`.

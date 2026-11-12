@@ -5,7 +5,8 @@ from datetime import timedelta
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import CampaignRecipient, Contact, ContactEvent, WebhookEvent, utcnow
+from app.ai import ai_active, get_conversation
+from app.models import CampaignRecipient, Contact, ContactEvent, Message, WebhookEvent, utcnow
 from app.phone import normalize_phone
 
 STOP_WORDS = {"stop", "unsubscribe", "stop all", "opt out", "optout", "cancel"}
@@ -67,7 +68,15 @@ def handle_message(db: Session, msg: dict, profile_name: str = "") -> Contact | 
     else:
         db.add(ContactEvent(contact_id=contact.id, kind="inbound", title="WhatsApp message", detail=text[:2000]))
 
+    # Inbox: keep the message, mark the chat unread, and queue it for the AI (only when the AI is on and a person hasn't taken over)
+    db.add(Message(contact_id=contact.id, direction="in", sender="customer", body=text[:4000], wamid=msg.get("id")))
+    conv = get_conversation(db, contact.id)
+    conv.last_message_at, conv.unread, conv.last_inbound_text = now, True, text[:300]
+    if word not in STOP_WORDS and word not in START_WORDS and not conv.needs_human and not conv.ai_paused and ai_active(db):
+        conv.awaiting_reply = True
+
     if word in STOP_WORDS:
+        conv.awaiting_reply = False
         return contact  # an opt-out is not engagement; don't count it as a campaign reply
 
     # Credit the reply to the latest campaign this person received in the last 7 days

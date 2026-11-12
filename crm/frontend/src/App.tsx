@@ -9,7 +9,9 @@ import Customers from "./pages/Customers";
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
 import Segments from "./pages/Segments";
+import AiAssistant from "./pages/AiAssistant";
 import Automations from "./pages/Automations";
+import Inbox from "./pages/Inbox";
 import Team from "./pages/Team";
 
 function RequireLogin({ children }: { children: JSX.Element }) {
@@ -35,6 +37,8 @@ export default function App() {
         <Route path="/campaigns/new" element={<CampaignNew />} />
         <Route path="/campaigns/:id" element={<CampaignDetail />} />
         <Route path="/campaigns/:id/edit" element={<CampaignNew />} />
+        <Route path="/inbox" element={<Inbox />} />
+        <Route path="/assistant" element={<AiAssistant />} />
         <Route path="/automations" element={<Automations />} />
         <Route path="/team" element={<Team />} />
       </Route>

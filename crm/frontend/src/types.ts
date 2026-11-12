@@ -191,3 +191,44 @@ export interface Stats {
   replies_30d: number;
   channels: { whatsapp: boolean; email: boolean };
 }
+
+export interface ChatRow {
+  contact_id: number;
+  name: string;
+  phone: string | null;
+  status: Status;
+  last_message_at: string;
+  preview: string;
+  needs_human: boolean;
+  handoff_reason: string;
+  ai_paused: boolean;
+  unread: boolean;
+  window_open: boolean;
+}
+
+export interface ChatMessage {
+  id: number;
+  direction: "in" | "out";
+  sender: "customer" | "ai" | "staff";
+  body: string;
+  at: string;
+  staff_email: string;
+  error: string;
+}
+
+export interface ChatDetail extends ChatRow {
+  do_not_contact: boolean;
+  messages: ChatMessage[];
+}
+
+export interface AiSettingsView {
+  enabled: boolean;
+  knowledge: string;
+  extra_instructions: string;
+  max_replies_per_day: number;
+  configured: boolean;
+  model: string;
+  ai_replies_24h: number;
+  tokens_24h: number;
+  waiting_for_staff: number;
+}

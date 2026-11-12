@@ -219,3 +219,49 @@ class CampaignRecipient(Base):
 
     campaign: Mapped[Campaign] = relationship(back_populates="recipients")
     contact: Mapped[Contact] = relationship()
+
+
+class Message(Base):
+    """One WhatsApp message in a conversation, in either direction. The AI reads its context from here."""
+
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    contact_id: Mapped[int] = mapped_column(ForeignKey("contacts.id", ondelete="CASCADE"), index=True)
+    direction: Mapped[str] = mapped_column(String(3))  # in / out
+    sender: Mapped[str] = mapped_column(String(10))  # customer / ai / staff
+    body: Mapped[str] = mapped_column(Text, default="")
+    wamid: Mapped[str | None] = mapped_column(String(160))
+    staff_email: Mapped[str] = mapped_column(String(200), default="")
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
+class Conversation(Base):
+    """Inbox state for one customer: who has to act next."""
+
+    __tablename__ = "conversations"
+
+    contact_id: Mapped[int] = mapped_column(ForeignKey("contacts.id", ondelete="CASCADE"), primary_key=True)
+    awaiting_reply: Mapped[bool] = mapped_column(Boolean, default=False, index=True)  # customer wrote last, AI hasn't answered yet
+    needs_human: Mapped[bool] = mapped_column(Boolean, default=False, index=True)  # the AI asked staff to take over
+    handoff_reason: Mapped[str] = mapped_column(String(300), default="")
+    ai_paused: Mapped[bool] = mapped_column(Boolean, default=False)  # staff took over; the AI stays quiet
+    unread: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_message_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+    last_inbound_text: Mapped[str] = mapped_column(String(300), default="")
+
+
+class AiSettings(Base):
+    """The one row that controls the AI assistant. Off until an administrator switches it on."""
+
+    __tablename__ = "ai_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    knowledge: Mapped[str] = mapped_column(Text, default="")  # what KGL offers, prices it may quote, rules, FAQs
+    extra_instructions: Mapped[str] = mapped_column(Text, default="")
+    max_replies_per_day: Mapped[int] = mapped_column(Integer, default=12)  # per customer, a runaway-loop and cost guard
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
